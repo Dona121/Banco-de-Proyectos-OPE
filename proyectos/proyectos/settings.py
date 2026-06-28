@@ -174,7 +174,8 @@ STATICFILES_DIRS = [
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 CSRF_TRUSTED_ORIGINS = [
-    "https://chase-nondrinkable-editorially.ngrok-free.dev"
+    "https://chase-nondrinkable-editorially.ngrok-free.dev",
+    "https://banco-de-proyectos-ope-production.up.railway.app/"
 ]
 
 # Media files (archivos subidos por los formuladores)
