@@ -175,8 +175,13 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 CSRF_TRUSTED_ORIGINS = [
     "https://chase-nondrinkable-editorially.ngrok-free.dev",
-    "https://banco-de-proyectos-ope-production.up.railway.app/"
+    "https://banco-de-proyectos-ope-production.up.railway.app",
 ]
+
+# Railway (y otros PaaS) terminan el TLS en su proxy y reenvían al contenedor por
+# HTTP. Esto le dice a Django que la petición original era HTTPS, para que las
+# comprobaciones de seguridad (CSRF, cookies, is_secure) usen el esquema correcto.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # Media files (archivos subidos por los formuladores)
 MEDIA_URL = 'media/'
