@@ -1,0 +1,94 @@
+{% comment %}Flujograma del proceso completo de la app de contenido: proyectos → actividades → subactividades (estático, en lenguaje sencillo). Se abre como modal con la variable Alpine `flujograma`. Se teletransporta al <body> con x-teleport para no quedar atrapado en el stacking context de <main> (.page anima opacity/transform). Firma de diseño: carril de rol (barra de color a la izquierda) para leer de un vistazo quién hace cada paso.{% endcomment %}
+<template x-teleport="body">
+<div x-show="flujograma" x-transition.opacity
+     class="fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-4" style="display:none"
+     @keydown.escape.window="flujograma=false">
+  <div @click.outside="flujograma=false"
+       class="card w-full max-w-2xl max-h-[88vh] overflow-y-auto p-6">
+
+    <!-- Encabezado -->
+    <div class="mb-4 flex items-start justify-between">
+      <div>
+        <h2 class="font-head text-lg font-bold text-slate-800">Flujograma del proceso</h2>
+        <p class="text-xs text-slate-400">Proyecto y actividades · quién hace cada paso</p>
+      </div>
+      <button @click="flujograma=false" class="text-slate-400 hover:text-slate-600" aria-label="Cerrar">
+        <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <!-- Leyenda de roles (el color de la barra de cada paso indica quién lo hace) -->
+    <div class="mb-5 flex flex-wrap gap-x-4 gap-y-1.5 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+      <span class="inline-flex items-center gap-1.5"><span class="h-2.5 w-1 rounded-full bg-brand"></span>Director</span>
+      <span class="inline-flex items-center gap-1.5"><span class="h-2.5 w-1 rounded-full bg-azul"></span>Coordinador</span>
+      <span class="inline-flex items-center gap-1.5"><span class="h-2.5 w-1 rounded-full bg-slate-500"></span>Formulador</span>
+      <span class="inline-flex items-center gap-1.5"><span class="h-3 w-3 rotate-45 rounded-[2px] border border-ambar bg-ambar-light"></span>Decisión</span>
+    </div>
+
+    <div class="text-sm">
+
+      <!-- 01 Proyecto -->
+      <div class="rounded-lg border border-slate-200 border-l-4 border-l-brand bg-white px-4 py-3 shadow-sm">
+        <div class="mb-0.5 flex items-center justify-between">
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-brand-dark">Director</span>
+          <span class="text-[10px] font-bold text-slate-300">PASO 01</span>
+        </div>
+        <p class="text-slate-700">Crea el proyecto y se lo asigna a un coordinador para que lo gestione.</p>
+      </div>
+      {% include 'web/actividades/_flecha.html' %}
+
+      <!-- 02 Actividades + subactividades -->
+      <div class="rounded-lg border border-slate-200 border-l-4 border-l-azul bg-white px-4 py-3 shadow-sm">
+        <div class="mb-0.5 flex items-center justify-between">
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-azul">Coordinador</span>
+          <span class="text-[10px] font-bold text-slate-300">PASO 02</span>
+        </div>
+        <p class="text-slate-700">Dentro del proyecto crea las actividades, les pone fecha de entrega y se las asigna a un formulador.</p>
+        <p class="mt-1 text-xs text-slate-500">Si una actividad es grande, la divide en subactividades (los pasos más pequeños que la componen).</p>
+      </div>
+      {% include 'web/actividades/_flecha.html' %}
+
+      <!-- 03 Entrega del formulador -->
+      <div class="rounded-lg border border-slate-200 border-l-4 border-l-slate-500 bg-white px-4 py-3 shadow-sm">
+        <div class="mb-0.5 flex items-center justify-between">
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Formulador</span>
+          <span class="text-[10px] font-bold text-slate-300">PASO 03</span>
+        </div>
+        <p class="text-slate-700">Realiza la actividad (y sus subactividades) y la entrega junto con los documentos de soporte.</p>
+      </div>
+      {% include 'web/actividades/_flecha.html' %}
+
+      <!-- Decisión: revisión del coordinador -->
+      <div class="rounded-lg border border-ambar/50 bg-ambar-light px-4 py-3 shadow-sm">
+        <div class="mb-1 flex items-center gap-2">
+          <span class="inline-block h-3 w-3 rotate-45 rounded-[2px] bg-ambar"></span>
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-ambar-dark">Decisión · Coordinador</span>
+        </div>
+        <p class="font-semibold text-slate-800">Revisa la entrega del formulador</p>
+        <div class="mt-2 space-y-1.5 text-xs text-slate-700">
+          <p><span class="mr-1 rounded-full bg-brand-light px-2 py-0.5 font-medium text-brand-dark">Aprobada</span>la actividad queda terminada.</p>
+          <p><span class="mr-1 rounded-full bg-ambar-light px-2 py-0.5 font-medium text-ambar-dark ring-1 ring-ambar/40">Requiere ajustes</span>vuelve al formulador para corregir.</p>
+          <p><span class="mr-1 rounded-full bg-rojo-light px-2 py-0.5 font-medium text-rojo">Rechazada</span>vuelve al formulador para corregir.</p>
+        </div>
+      </div>
+
+      <!-- Lazo de corrección -->
+      <div class="my-1.5 flex items-center justify-center gap-2 text-ambar-dark" aria-hidden="true">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3"/></svg>
+        <span class="text-[11px] font-semibold uppercase tracking-wide">Si piden correcciones</span>
+      </div>
+      <div class="rounded-lg border border-dashed border-ambar/60 bg-ambar-light px-4 py-3 text-xs text-ambar-dark">
+        Si el coordinador pide ajustes o no la aprueba, el formulador corrige y vuelve a entregar (paso 03). El coordinador revisa de nuevo. Esto se repite hasta que la actividad quede aprobada.
+      </div>
+      {% include 'web/actividades/_flecha.html' %}
+
+      <!-- Fin -->
+      <div class="rounded-lg border border-brand/40 bg-brand-light px-4 py-3">
+        <span class="text-[11px] font-semibold uppercase tracking-wide text-brand-dark">Fin</span>
+        <p class="font-medium text-brand-dark">Cuando el coordinador aprueba, la actividad queda terminada. El proyecto avanza a medida que se aprueban todas sus actividades.</p>
+      </div>
+
+    </div>
+  </div>
+</div>
+</template>

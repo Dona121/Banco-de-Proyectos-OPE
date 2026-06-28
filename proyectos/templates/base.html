@@ -1,0 +1,63 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es" class="h-full">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Gestión de Proyectos · Gobernación de Sucre{% endblock %}</title>
+  <link rel="icon" type="image/png" href="{% static 'logos/escudo-color.png' %}">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Open+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { DEFAULT: '#109d39', dark: '#0c7d2d', darker: '#095e22', light: '#e7f6ec', 50: '#f0faf3' },
+            azul:  { DEFAULT: '#0b72ab', light: '#e6f1f7' },
+            rojo:  { DEFAULT: '#d92a34', light: '#fbe9ea' },
+            ambar: { DEFAULT: '#ffa700', light: '#fff4e0' },
+          },
+          fontFamily: {
+            sans: ['"Open Sans"', 'system-ui', 'sans-serif'],
+            head: ['Montserrat', 'system-ui', 'sans-serif'],
+          },
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="{% static 'web/app.css' %}">
+  <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+</head>
+<body class="h-full bg-slate-50 font-sans text-slate-700 antialiased">
+  {% block body %}{% endblock %}
+
+  {% if messages %}
+  <div class="fixed top-4 right-4 z-50 flex flex-col gap-2.5 w-80"
+       x-data="{}" x-init="setTimeout(() => $el.querySelectorAll('[data-toast]').forEach(t => t.remove()), 5000)">
+    {% for message in messages %}
+    <div data-toast style="animation: slideInRight .3s ease both"
+         class="flex items-start gap-3 rounded-xl border bg-white px-4 py-3 text-sm shadow-lg
+         {% if message.tags == 'success' %}border-brand/25{% elif message.tags == 'error' %}border-rojo/25{% else %}border-slate-200{% endif %}">
+      <span class="mt-0.5 shrink-0
+        {% if message.tags == 'success' %}text-brand{% elif message.tags == 'error' %}text-rojo{% else %}text-slate-400{% endif %}">
+        {% if message.tags == 'success' %}
+          <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+        {% elif message.tags == 'error' %}
+          <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></svg>
+        {% else %}
+          <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"/></svg>
+        {% endif %}
+      </span>
+      <span class="text-slate-700 leading-snug">{{ message }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</body>
+</html>

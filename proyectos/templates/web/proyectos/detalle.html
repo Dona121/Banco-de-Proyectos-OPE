@@ -1,0 +1,55 @@
+{% extends "base_app.html" %}
+{% load web_extras humanize %}
+
+{% block title %}{{ proyecto.nombre }} · Proyectos{% endblock %}
+
+{% block app_content %}
+<div class="card p-6 mb-6">
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <div>
+      <p class="text-xs font-semibold uppercase tracking-wide text-brand">Proyecto</p>
+      <h1 class="mt-1 font-head text-2xl font-bold text-slate-800">{{ proyecto.nombre }}</h1>
+      <div class="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-500">
+        <span>Coordinador: <strong class="text-slate-700">{{ proyecto.asignado_a.get_full_name|default:proyecto.asignado_a.username }}</strong></span>
+        <span>Creado por: {{ proyecto.creador_por.get_full_name|default:proyecto.creador_por.username }}</span>
+        <span>{{ proyecto.fecha_creacion|naturalday }}</span>
+      </div>
+    </div>
+    <div class="flex gap-2">
+      {% if es_director %}
+      <a href="{% url 'web:proyecto_editar' proyecto.pk %}" class="btn btn-outline">Editar</a>
+      {% endif %}
+      {% if puede_crear_actividad %}
+      <a href="{% url 'web:actividad_nueva' proyecto.pk %}" class="btn btn-primary">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+        Nueva actividad
+      </a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<h2 class="font-head font-semibold text-slate-800 mb-3">Actividades</h2>
+<div class="card">
+  <div class="table-wrap">
+    <table class="data">
+      <thead>
+        <tr><th>Actividad</th><th>Formulador</th><th>Estado</th><th>Vence</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for a in actividades %}
+        <tr>
+          <td class="font-medium text-slate-700">{{ a.nombre }}</td>
+          <td class="text-slate-500">{{ a.asignado_a.get_full_name|default:a.asignado_a.username }}</td>
+          <td>{% estado_badge a.estado %}</td>
+          <td class="{% if a|vencida %}text-rojo font-semibold{% else %}text-slate-500{% endif %}">{{ a.fecha_vencimiento|date:"d M Y" }}</td>
+          <td class="text-right"><a href="{% url 'web:actividad_detalle' a.pk %}" class="text-brand font-semibold hover:underline">Ver</a></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="py-10 text-center text-slate-400">Este proyecto aún no tiene actividades.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,49 @@
+{% extends "base_app.html" %}
+{% load humanize %}
+
+{% block title %}Mi perfil · Gestión de Proyectos{% endblock %}
+
+{% block app_content %}
+<div class="card p-6 mb-6">
+  <div class="flex items-center gap-4">
+    <span class="grid h-16 w-16 place-items-center rounded-2xl bg-brand text-white font-head text-2xl font-extrabold">
+      {{ user.first_name|first|default:user.username|first|upper }}
+    </span>
+    <div>
+      <h1 class="font-head text-2xl font-bold text-slate-800">{{ user.get_full_name|default:user.username }}</h1>
+      <p class="text-sm text-slate-500">{{ user.email|default:"Sin correo registrado" }}</p>
+      <span class="mt-1 inline-block badge badge-aprobada">{{ rol_principal }}</span>
+    </div>
+  </div>
+</div>
+
+<div class="grid gap-4 sm:grid-cols-2 mb-6">
+  <div class="card p-5"><p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Proyectos relacionados</p><p class="mt-2 font-head text-3xl font-bold text-slate-800">{{ proyectos_relacionados }}</p></div>
+  <div class="card p-5"><p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Actividades relacionadas</p><p class="mt-2 font-head text-3xl font-bold text-slate-800">{{ actividades_relacionadas }}</p></div>
+</div>
+
+<div class="grid gap-6 lg:grid-cols-2">
+  <div class="card p-5">
+    <h2 class="font-head font-semibold text-slate-800 mb-3">Mis entregas recientes</h2>
+    <div class="divide-y divide-slate-100">
+      {% for e in entregas_recientes %}
+      <a href="{% url 'web:entrega_detalle' e.pk %}" class="flex items-center justify-between gap-3 py-3 hover:bg-slate-50 -mx-2 px-2 rounded-lg">
+        <span class="truncate text-sm text-slate-600">{{ e.actividad.nombre }} · v{{ e.numero_version }}</span>
+        <span class="text-xs text-slate-400 shrink-0">{{ e.fecha_creacion|naturaltime }}</span>
+      </a>
+      {% empty %}<p class="py-6 text-center text-sm text-slate-400">Sin entregas.</p>{% endfor %}
+    </div>
+  </div>
+  <div class="card p-5">
+    <h2 class="font-head font-semibold text-slate-800 mb-3">Mis revisiones recientes</h2>
+    <div class="divide-y divide-slate-100">
+      {% for r in revisiones_recientes %}
+      <a href="{% url 'web:entrega_detalle' r.actividad_entrega_id %}" class="flex items-center justify-between gap-3 py-3 hover:bg-slate-50 -mx-2 px-2 rounded-lg">
+        <span class="truncate text-sm text-slate-600">{{ r.actividad_entrega.actividad.nombre }}</span>
+        <span class="text-xs text-slate-400 shrink-0">{{ r.fecha_creacion|naturaltime }}</span>
+      </a>
+      {% empty %}<p class="py-6 text-center text-sm text-slate-400">Sin revisiones.</p>{% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

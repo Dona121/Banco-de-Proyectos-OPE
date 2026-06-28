@@ -1,0 +1,58 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ---- Entornos virtuales ----
+.venv/
+venv/
+env/
+ENV/
+
+# ---- uv ----
+# El lockfile (uv.lock) SÍ se versiona; el caché local no.
+.uv/
+
+# ---- Django ----
+*.log
+db.sqlite3
+db.sqlite3-journal
+local_settings.py
+
+# Archivos subidos por usuarios (no versionar)
+media/
+proyectos/media/
+
+# Estáticos recolectados (collectstatic)
+/staticfiles/
+/static_root/
+
+# ---- Variables de entorno / secretos ----
+.env
+.env.*
+!.env.example
+*.pem
+
+# ---- Editores / IDE ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---- Sistema operativo ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Pruebas / cobertura ----
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/

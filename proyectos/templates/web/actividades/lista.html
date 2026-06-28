@@ -1,0 +1,67 @@
+{% extends "base_app.html" %}
+{% load web_extras %}
+
+{% block title %}Actividades · Gestión de Proyectos{% endblock %}
+
+{% block app_content %}
+<div x-data="{ flujograma:false }">
+<div class="mb-6 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h1 class="font-head text-2xl font-bold text-slate-800">Actividades</h1>
+    <p class="text-sm text-slate-500">{{ paginator.count }} actividad{{ paginator.count|pluralize:"es" }} en total.</p>
+  </div>
+  <button type="button" @click="flujograma=true" class="btn btn-outline">Flujograma del proceso</button>
+</div>
+
+<form method="get" class="card p-4 mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+  <div class="relative sm:col-span-2 lg:col-span-2">
+    <svg class="pointer-events-none absolute left-3 top-2.5 h-5 w-5 text-slate-400" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
+    <input name="q" value="{{ q }}" placeholder="Buscar actividad o proyecto…"
+           class="w-full rounded-lg border border-slate-300 bg-white py-2 pl-10 pr-3 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 focus:outline-none">
+  </div>
+  <select name="estado" class="rounded-lg border border-slate-300 bg-white py-2 px-3 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 focus:outline-none">
+    <option value="">Todos los estados</option>
+    {% for code, label in estados %}
+    <option value="{{ code }}" {% if code == estado_sel %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <div class="flex gap-2 min-w-0">
+    <select name="proyecto" class="min-w-0 flex-1 truncate rounded-lg border border-slate-300 bg-white py-2 px-3 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 focus:outline-none">
+      <option value="">Todos los proyectos</option>
+      {% for p in proyectos %}
+      <option value="{{ p.pk }}" {% if proyecto_sel == p.pk|stringformat:'s' %}selected{% endif %}>{{ p.nombre }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn btn-primary px-4 shrink-0">Filtrar</button>
+  </div>
+</form>
+
+<div class="card">
+  <div class="table-wrap">
+    <table class="data">
+      <thead>
+        <tr><th>Actividad</th><th>Proyecto</th><th>Formulador</th><th>Estado</th><th>Vence</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for a in actividades %}
+        <tr>
+          <td class="font-medium text-slate-700">{{ a.nombre }}</td>
+          <td class="text-slate-500">{{ a.proyecto.nombre }}</td>
+          <td class="text-slate-500">{{ a.asignado_a.get_full_name|default:a.asignado_a.username }}</td>
+          <td>{% estado_badge a.estado %}</td>
+          <td class="{% if a|vencida %}text-rojo font-semibold{% else %}text-slate-500{% endif %}">{{ a.fecha_vencimiento|date:"d M Y" }}</td>
+          <td class="text-right"><a href="{% url 'web:actividad_detalle' a.pk %}" class="text-brand font-semibold hover:underline">Ver</a></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="py-10 text-center text-slate-400">No se encontraron actividades con esos filtros.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% include 'components/paginacion.html' %}
+
+{% include 'web/actividades/_flujograma.html' %}
+</div>
+{% endblock %}

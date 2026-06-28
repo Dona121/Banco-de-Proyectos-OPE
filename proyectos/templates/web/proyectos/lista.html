@@ -1,0 +1,55 @@
+{% extends "base_app.html" %}
+{% load humanize %}
+
+{% block title %}Proyectos · Gestión de Proyectos{% endblock %}
+
+{% block app_content %}
+<div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+  <div>
+    <h1 class="font-head text-2xl font-bold text-slate-800">Proyectos</h1>
+    <p class="text-sm text-slate-500">{{ paginator.count }} proyecto{{ paginator.count|pluralize }} a tu cargo.</p>
+  </div>
+  {% if es_director %}
+  <a href="{% url 'web:proyecto_nuevo' %}" class="btn btn-primary">
+    <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+    Nuevo proyecto
+  </a>
+  {% endif %}
+</div>
+
+<form method="get" class="mb-5">
+  <div class="relative max-w-sm">
+    <svg class="pointer-events-none absolute left-3 top-2.5 h-5 w-5 text-slate-400" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
+    <input name="q" value="{{ q }}" placeholder="Buscar proyecto…"
+           class="w-full rounded-lg border border-slate-300 bg-white py-2 pl-10 pr-3 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 focus:outline-none">
+  </div>
+</form>
+
+<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+  {% for proyecto in proyectos %}
+  <a href="{% url 'web:proyecto_detalle' proyecto.pk %}" class="card card-hover p-5 group">
+    <div class="flex items-start justify-between">
+      <span class="grid h-10 w-10 place-items-center rounded-lg bg-brand-light text-brand">
+        <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"/></svg>
+      </span>
+      <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{{ proyecto.n_actividades }} actividad{{ proyecto.n_actividades|pluralize:"es" }}</span>
+    </div>
+    <h3 class="mt-4 font-head font-semibold text-slate-800 group-hover:text-brand line-clamp-2">{{ proyecto.nombre }}</h3>
+    <div class="mt-3 flex items-center gap-2 text-xs text-slate-500">
+      <span class="grid h-6 w-6 place-items-center rounded-full bg-azul-light text-azul font-bold">{{ proyecto.asignado_a.first_name|first|default:proyecto.asignado_a.username|first|upper }}</span>
+      <span>{{ proyecto.asignado_a.get_full_name|default:proyecto.asignado_a.username }}</span>
+    </div>
+    <p class="mt-3 text-xs text-slate-400">Creado {{ proyecto.fecha_creacion|naturalday }}</p>
+  </a>
+  {% empty %}
+  <div class="col-span-full card p-12 text-center">
+    <p class="font-head font-semibold text-slate-700">No hay proyectos</p>
+    <p class="mt-1 text-sm text-slate-400">
+      {% if es_director %}Crea el primer proyecto para empezar.{% else %}Aún no tienes proyectos asignados.{% endif %}
+    </p>
+  </div>
+  {% endfor %}
+</div>
+
+{% include 'components/paginacion.html' %}
+{% endblock %}

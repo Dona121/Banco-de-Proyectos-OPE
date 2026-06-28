@@ -1,0 +1,29 @@
+{% extends "base_app.html" %}
+
+{% block title %}{{ titulo }} · Actividades{% endblock %}
+
+{% block app_content %}
+<div class="max-w-xl">
+  <h1 class="font-head text-2xl font-bold text-slate-800 mb-1">{{ titulo }}</h1>
+  <p class="text-sm text-slate-500 mb-6">Proyecto: <strong class="text-slate-700">{{ proyecto.nombre }}</strong></p>
+
+  <form method="post" class="card p-6 space-y-5">
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+    <div class="rounded-lg border border-rojo/30 bg-rojo-light px-4 py-3 text-sm text-rojo">
+      {{ form.non_field_errors }}
+    </div>
+    {% endif %}
+    {% include 'components/form_field.html' with field=form.nombre %}
+    <div class="grid sm:grid-cols-2 gap-5">
+      {% include 'components/form_field.html' with field=form.fecha_programada %}
+      {% include 'components/form_field.html' with field=form.fecha_vencimiento %}
+    </div>
+    {% include 'components/form_field.html' with field=form.asignado_a %}
+    <div class="flex gap-3 pt-2">
+      <button type="submit" class="btn btn-primary">Crear actividad</button>
+      <a href="{% url 'web:proyecto_detalle' proyecto.pk %}" class="btn btn-outline">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

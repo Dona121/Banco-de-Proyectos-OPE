@@ -1,0 +1,26 @@
+{% extends "base_app.html" %}
+
+{% block title %}{{ titulo }} · Proyectos{% endblock %}
+
+{% block app_content %}
+<div class="max-w-xl">
+  <h1 class="font-head text-2xl font-bold text-slate-800 mb-1">{{ titulo }}</h1>
+  <p class="text-sm text-slate-500 mb-6">Define el nombre del proyecto y asígnalo a un coordinador.</p>
+
+  <form method="post" class="card p-6 space-y-5">
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+    <div class="rounded-lg border border-rojo/30 bg-rojo-light px-4 py-3 text-sm text-rojo">
+      {{ form.non_field_errors }}
+    </div>
+    {% endif %}
+    {% for field in form %}
+      {% include 'components/form_field.html' with field=field %}
+    {% endfor %}
+    <div class="flex gap-3 pt-2">
+      <button type="submit" class="btn btn-primary">Guardar</button>
+      <a href="{% url 'web:proyectos' %}" class="btn btn-outline">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

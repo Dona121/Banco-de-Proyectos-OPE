@@ -1,0 +1,122 @@
+{% extends "base_app.html" %}
+{% load web_extras humanize %}
+
+{% block title %}{{ actividad.nombre }} · Actividades{% endblock %}
+
+{% block app_content %}
+<div class="card p-6 mb-6">
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <div class="min-w-0">
+      <div class="flex items-center gap-3">
+        <p class="text-xs font-semibold uppercase tracking-wide text-brand">Actividad</p>
+        {% estado_badge actividad.estado %}
+        {% if actividad|vencida %}<span class="badge badge-rechazada">Vencida</span>{% endif %}
+      </div>
+      <h1 class="mt-1 font-head text-2xl font-bold text-slate-800">{{ actividad.nombre }}</h1>
+      <a href="{% url 'web:proyecto_detalle' actividad.proyecto_id %}" class="text-sm text-slate-500 hover:text-brand">
+        {{ actividad.proyecto.nombre }}
+      </a>
+    </div>
+    {% if puede_entregar %}
+    <a href="{% url 'web:entrega_nueva' actividad.pk %}" class="btn btn-primary">
+      <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+      Nueva entrega
+    </a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="grid gap-6 lg:grid-cols-3">
+  <!-- Columna principal: línea de tiempo -->
+  <div class="lg:col-span-2 space-y-6">
+    <div class="card p-6">
+      <h2 class="font-head font-semibold text-slate-800 mb-5">Historial de versiones y revisiones</h2>
+      {% if timeline %}
+      <div class="timeline space-y-6">
+        {% for ev in timeline %}
+        <div class="relative">
+          {% if ev.tipo == 'entrega' %}
+          <span class="timeline-dot dot-entrega"></span>
+          <a href="{% url 'web:entrega_detalle' ev.obj.pk %}"
+             class="group relative block rounded-lg border border-azul/25 border-l-[3px] border-l-azul bg-azul-light/40 p-4 pr-11 shadow-sm transition hover:border-azul/50 hover:bg-azul-light hover:shadow-md">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2">
+                <span class="inline-flex items-center rounded-md bg-azul px-2 py-0.5 text-xs font-bold text-white">v{{ ev.obj.numero_version }}</span>
+                <p class="font-semibold text-slate-800 group-hover:text-azul transition">Entrega</p>
+              </div>
+              <span class="text-xs text-slate-400">{{ ev.fecha|naturaltime }}</span>
+            </div>
+            <p class="mt-1.5 text-sm text-slate-600 line-clamp-2">{{ ev.obj.comentario }}</p>
+            <div class="mt-2 flex items-center gap-3 text-xs text-slate-400">
+              <span>Por {{ ev.obj.usuario.get_full_name|default:ev.obj.usuario.username }}</span>
+              <span class="inline-flex items-center gap-1">
+                <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg>
+                {{ ev.obj.documentos_set.count }} documento{{ ev.obj.documentos_set.count|pluralize }}
+              </span>
+            </div>
+            <span class="absolute right-3 top-1/2 -translate-y-1/2 text-azul/50 transition group-hover:text-azul group-hover:translate-x-0.5">
+              <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg>
+            </span>
+          </a>
+          {% else %}
+          <span class="timeline-dot {% if ev.obj.resultado == 'AP' %}dot-aprobada{% elif ev.obj.resultado == 'AJ' %}dot-ajustes{% else %}dot-rechazada{% endif %}"></span>
+          <div class="rounded-lg border border-slate-100 bg-slate-50/60 p-4">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2">
+                <p class="font-semibold text-slate-700">Revisión</p>
+                {% resultado_badge ev.obj.resultado %}
+              </div>
+              <span class="text-xs text-slate-400">{{ ev.fecha|naturaltime }}</span>
+            </div>
+            <p class="mt-1 text-sm text-slate-500">{{ ev.obj.comentario }}</p>
+            <p class="mt-2 text-xs text-slate-400">Por {{ ev.obj.revisor.get_full_name|default:ev.obj.revisor.username }}</p>
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="py-10 text-center">
+        <p class="text-slate-500 font-medium">Sin entregas todavía</p>
+        <p class="mt-1 text-sm text-slate-400">
+          {% if puede_entregar %}Registra la primera entrega para iniciar el flujo.{% else %}El formulador aún no registra entregas.{% endif %}
+        </p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Columna lateral -->
+  <div class="space-y-6">
+    <div class="card p-5">
+      <h3 class="font-head font-semibold text-slate-800 mb-4">Detalles</h3>
+      <dl class="space-y-3 text-sm">
+        <div class="flex justify-between gap-2"><dt class="text-slate-400">Formulador</dt><dd class="text-slate-700 text-right">{{ actividad.asignado_a.get_full_name|default:actividad.asignado_a.username }}</dd></div>
+        <div class="flex justify-between gap-2"><dt class="text-slate-400">Asignó</dt><dd class="text-slate-700 text-right">{{ actividad.asignado_por.get_full_name|default:actividad.asignado_por.username }}</dd></div>
+        <div class="flex justify-between gap-2"><dt class="text-slate-400">Programada</dt><dd class="text-slate-700 text-right">{{ actividad.fecha_programada|date:"d M Y H:i" }}</dd></div>
+        <div class="flex justify-between gap-2"><dt class="text-slate-400">Vence</dt><dd class="text-right {% if actividad|vencida %}text-rojo font-semibold{% else %}text-slate-700{% endif %}">{{ actividad.fecha_vencimiento|date:"d M Y H:i" }}</dd></div>
+      </dl>
+    </div>
+
+    <div class="card p-5">
+      <h3 class="font-head font-semibold text-slate-800 mb-3">Subactividades</h3>
+      <ul class="space-y-2">
+        {% for s in subactividades %}
+        <li class="flex items-center gap-2 text-sm text-slate-600">
+          <span class="h-1.5 w-1.5 rounded-full bg-brand"></span>{{ s.nombre }}
+        </li>
+        {% empty %}
+        <li class="text-sm text-slate-400">Sin subactividades.</li>
+        {% endfor %}
+      </ul>
+      {% if puede_gestionar %}
+      <form method="post" action="{% url 'web:subactividad_nueva' actividad.pk %}" class="mt-4 flex gap-2">
+        {% csrf_token %}
+        {{ subactividad_form.nombre }}
+        <button class="btn btn-soft px-3 shrink-0">Añadir</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

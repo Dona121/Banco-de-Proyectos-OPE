@@ -1,0 +1,146 @@
+{% extends "base_app.html" %}
+{% load web_extras humanize %}
+
+{% block title %}Inicio · Mi panel{% endblock %}
+
+{% block app_content %}
+<div class="mb-6">
+  <p class="text-xs font-semibold uppercase tracking-wide text-brand">Mi trabajo</p>
+  <h1 class="font-head text-2xl font-bold text-slate-800">Hola, {{ user.first_name|default:user.username }}</h1>
+  <p class="text-sm text-slate-500">
+    {% if dias_ultima_entrega is not None %}Tu última entrega fue hace {{ dias_ultima_entrega }} día{{ dias_ultima_entrega|pluralize }}.{% else %}Aún no has registrado entregas.{% endif %}
+  </p>
+</div>
+
+<!-- KPIs -->
+<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+  <div class="card kpi rise rise-1 p-5 flex items-center gap-4">
+    <span class="icon-chip chip-brand shrink-0"><svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 5.25h.008v.008h-.008V12Zm-.375 5.25h.007v.008H3.75v-.008Z"/></svg></span>
+    <div><p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Mis actividades</p><p class="font-head text-3xl font-bold text-slate-800 leading-tight">{{ total_actividades }}</p></div>
+  </div>
+  <div class="card kpi kpi-azul rise rise-2 p-5 flex items-center gap-4">
+    <span class="icon-chip chip-azul shrink-0"><svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg></span>
+    <div><p class="text-xs font-semibold uppercase tracking-wide text-slate-400">En revisión</p><p class="font-head text-3xl font-bold text-slate-800 leading-tight">{{ en_revision }}</p></div>
+  </div>
+  <div class="card kpi kpi-ambar rise rise-3 p-5 flex items-center gap-4">
+    <span class="icon-chip chip-ambar shrink-0"><svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/></svg></span>
+    <div><p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Requieren ajustes</p><p class="font-head text-3xl font-bold leading-tight {% if ajustes %}text-ambar{% else %}text-slate-800{% endif %}">{{ ajustes }}</p></div>
+  </div>
+  <div class="card kpi kpi-rojo rise rise-4 p-5 flex items-center gap-4">
+    <span class="icon-chip chip-rojo shrink-0"><svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg></span>
+    <div><p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Vencidas</p><p class="font-head text-3xl font-bold leading-tight {% if vencidas_count %}text-rojo{% else %}text-slate-800{% endif %}">{{ vencidas_count }}</p></div>
+  </div>
+</div>
+
+<div class="mt-6 grid gap-6 lg:grid-cols-3">
+  <!-- Estado -->
+  <div class="card p-5">
+    <h2 class="font-head font-semibold text-slate-800 mb-4">Mis actividades por estado</h2>
+    {% include 'components/estado_bar.html' %}
+  </div>
+  <!-- Por proyecto -->
+  <div class="card p-5 lg:col-span-2">
+    <h2 class="font-head font-semibold text-slate-800 mb-4">Actividades por proyecto</h2>
+    <div class="space-y-3.5">
+      {% for p in por_proyecto %}
+      <div>
+        <div class="flex items-center justify-between gap-3 text-sm mb-1">
+          <span class="truncate font-medium text-slate-700">{{ p.proyecto__nombre }}</span>
+          <span class="shrink-0 font-semibold text-slate-600">{{ p.c }}</span>
+        </div>
+        <div class="progress"><span style="width: {{ p.c|porcentaje:max_proyecto }}%"></span></div>
+      </div>
+      {% empty %}
+      <p class="py-6 text-center text-sm text-slate-400">No tienes actividades asignadas.</p>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<!-- Acciones requeridas -->
+<div class="mt-6 grid gap-6 lg:grid-cols-2">
+  <div class="card p-5 border-ambar/30">
+    <div class="flex items-center gap-2 mb-3">
+      <span class="grid h-7 w-7 place-items-center rounded-lg chip-ambar"><svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></svg></span>
+      <h2 class="font-head font-semibold text-slate-800">Requieren nueva entrega</h2>
+    </div>
+    <div class="divide-y divide-slate-100">
+      {% for a in requieren_nueva %}
+      <div class="flex items-center justify-between gap-3 py-3">
+        <a href="{% url 'web:actividad_detalle' a.pk %}" class="min-w-0 group">
+          <p class="truncate font-medium text-slate-700 group-hover:text-brand">{{ a.nombre }}</p>
+          <p class="truncate text-xs text-slate-400">{{ a.proyecto.nombre }}</p>
+        </a>
+        <a href="{% url 'web:entrega_nueva' a.pk %}" class="btn btn-ambar text-xs py-1.5 px-3 shrink-0">Nueva entrega</a>
+      </div>
+      {% empty %}
+      <p class="py-8 text-center text-sm text-slate-400">Nada por corregir.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card p-5">
+    <h2 class="font-head font-semibold text-slate-800 mb-3">Sin ninguna entrega <span class="text-slate-400 font-normal">({{ sin_entrega_count }})</span></h2>
+    <div class="divide-y divide-slate-100">
+      {% for a in sin_entrega %}
+      <div class="flex items-center justify-between gap-3 py-3">
+        <a href="{% url 'web:actividad_detalle' a.pk %}" class="min-w-0 group">
+          <p class="truncate font-medium text-slate-700 group-hover:text-brand">{{ a.nombre }}</p>
+          <p class="truncate text-xs {% if a|vencida %}text-rojo font-semibold{% else %}text-slate-400{% endif %}">Vence {{ a.fecha_vencimiento|date:"d M Y" }}</p>
+        </a>
+        <a href="{% url 'web:entrega_nueva' a.pk %}" class="btn btn-soft text-xs py-1.5 px-3 shrink-0">Entregar</a>
+      </div>
+      {% empty %}
+      <p class="py-8 text-center text-sm text-slate-400">Todas tus actividades tienen entregas.</p>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<!-- Mis actividades + historial -->
+<div class="mt-6 grid gap-6 lg:grid-cols-3">
+  <div class="card p-5 lg:col-span-2">
+    <h2 class="font-head font-semibold text-slate-800 mb-3">Mis actividades</h2>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Actividad</th><th>Proyecto</th><th>Estado</th><th>Restan</th></tr></thead>
+        <tbody>
+          {% for a in mis_actividades %}
+          {% with dr=a.fecha_vencimiento|dias_restantes %}
+          <tr class="cursor-pointer" onclick="window.location='{% url 'web:actividad_detalle' a.pk %}'">
+            <td class="font-medium text-slate-700">{{ a.nombre }}</td>
+            <td class="text-slate-500">{{ a.proyecto.nombre }}</td>
+            <td>{% estado_badge a.estado %}</td>
+            <td>
+              {% if a.estado == 'AP' %}<span class="text-slate-400">—</span>
+              {% elif dr < 0 %}<span class="text-rojo font-semibold">Vencida</span>
+              {% else %}<span class="text-slate-600">{{ dr }} día{{ dr|pluralize }}</span>{% endif %}
+            </td>
+          </tr>
+          {% endwith %}
+          {% empty %}
+          <tr><td colspan="4" class="py-8 text-center text-slate-400">No tienes actividades asignadas.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card p-5">
+    <h2 class="font-head font-semibold text-slate-800 mb-3">Mis entregas recientes</h2>
+    <div class="divide-y divide-slate-100">
+      {% for e in entregas_recientes %}
+      <a href="{% url 'web:entrega_detalle' e.pk %}" class="flex items-center justify-between gap-3 py-3 -mx-2 px-2 rounded-lg hover:bg-slate-50">
+        <div class="min-w-0">
+          <p class="truncate font-medium text-slate-700">{{ e.actividad.nombre }} · v{{ e.numero_version }}</p>
+          <p class="truncate text-xs text-slate-400">{{ e.fecha_creacion|naturaltime }}</p>
+        </div>
+        {% estado_badge e.actividad.estado %}
+      </a>
+      {% empty %}
+      <p class="py-8 text-center text-sm text-slate-400">Aún no registras entregas.</p>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

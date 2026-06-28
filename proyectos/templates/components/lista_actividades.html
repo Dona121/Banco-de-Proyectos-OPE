@@ -1,0 +1,23 @@
+{# Lista compacta de actividades. Espera: titulo, items, vacio, alerta(opcional) #}
+{% load web_extras %}
+<div class="card p-5">
+  <h2 class="font-head font-semibold text-slate-800 mb-3">{{ titulo }}</h2>
+  <div class="divide-y divide-slate-100">
+    {% for a in items %}
+    <a href="{% url 'web:actividad_detalle' a.pk %}" class="flex items-center justify-between gap-3 py-3 -mx-2 px-2 rounded-lg hover:bg-slate-50">
+      <div class="min-w-0">
+        <p class="truncate font-medium text-slate-700">{{ a.nombre }}</p>
+        <p class="truncate text-xs text-slate-400">{{ a.proyecto.nombre }}</p>
+      </div>
+      <div class="text-right shrink-0">
+        {% estado_badge a.estado %}
+        <p class="mt-1 text-[11px] {% if alerta %}text-rojo font-semibold{% else %}text-slate-400{% endif %}">
+          {% if alerta %}Venció {{ a.fecha_vencimiento|date:"d M" }}{% else %}Vence {{ a.fecha_vencimiento|date:"d M" }}{% endif %}
+        </p>
+      </div>
+    </a>
+    {% empty %}
+    <p class="py-8 text-center text-sm text-slate-400">{{ vacio }}</p>
+    {% endfor %}
+  </div>
+</div>

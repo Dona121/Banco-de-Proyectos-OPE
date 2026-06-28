@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Ingresar · Gestión de Proyectos{% endblock %}
+
+{% block body %}
+<div class="min-h-full grid lg:grid-cols-2">
+  <!-- Panel de marca -->
+  <div class="relative hidden lg:flex flex-col justify-between overflow-hidden bg-brand-dark p-12 text-white">
+    <!-- Motivos decorativos -->
+    <svg class="pointer-events-none absolute -right-16 -top-16 h-80 w-80 text-white/20" viewBox="0 0 100 100" fill="currentColor">
+      <g>{% for i in "012345678901234567890123" %}<rect x="49" y="2" width="2" height="46" transform="rotate({% widthratio forloop.counter0 1 15 %} 50 50)"/>{% endfor %}</g>
+    </svg>
+    <div class="pointer-events-none absolute -bottom-24 -left-20 h-72 w-72 rounded-full bg-white/10"></div>
+
+    <div class="relative flex items-center gap-3">
+      <img src="{% static 'logos/escudo-blanco.png' %}" alt="Escudo de Sucre" class="h-12 w-auto shrink-0">
+      <div class="leading-tight">
+        <p class="font-head font-bold text-lg">Gobernación de Sucre</p>
+        <p class="text-sm text-white/70">Gestión de Proyectos</p>
+      </div>
+    </div>
+    <div class="relative">
+      <h1 class="font-head text-4xl font-extrabold leading-tight">Oficina de<br>Proyectos y<br>Estrategicos</h1>
+      <p class="mt-4 max-w-md text-white/80">Gestiona proyectos, actividades, entregas y revisiones con trazabilidad completa por rol.</p>
+      <div class="mt-8 flex flex-wrap gap-2">
+        <span class="rounded-full bg-white/15 px-3 py-1 text-xs font-semibold backdrop-blur">Proyectos</span>
+        <span class="rounded-full bg-white/15 px-3 py-1 text-xs font-semibold backdrop-blur">Actividades</span>
+        <span class="rounded-full bg-white/15 px-3 py-1 text-xs font-semibold backdrop-blur">Entregas</span>
+        <span class="rounded-full bg-white/15 px-3 py-1 text-xs font-semibold backdrop-blur">Revisiones</span>
+      </div>
+    </div>
+    <p class="relative text-xs text-white/60">© {% now "Y" %} Gobernación de Sucre. Todos los derechos reservados.</p>
+  </div>
+
+  <!-- Formulario -->
+  <div class="flex items-center justify-center p-6 sm:p-12">
+    <div class="w-full max-w-sm">
+      <div class="lg:hidden mb-8 flex items-center gap-3">
+        <img src="{% static 'logos/escudo-color.png' %}" alt="Escudo de Sucre" class="h-10 w-auto shrink-0">
+        <p class="font-head font-bold text-slate-800">Gobernación de Sucre</p>
+      </div>
+
+      <h2 class="font-head text-2xl font-bold text-slate-800">Bienvenido</h2>
+      <p class="mt-1 text-sm text-slate-500">Ingresa con tu usuario institucional.</p>
+
+      {% if form.non_field_errors %}
+      <div class="mt-5 rounded-lg border border-rojo/30 bg-rojo-light px-4 py-3 text-sm text-rojo">
+        Usuario o contraseña incorrectos.
+      </div>
+      {% endif %}
+
+      <form method="post" class="mt-6 space-y-4">
+        {% csrf_token %}
+        <div>
+          <label class="block text-sm font-medium text-slate-600 mb-1">Usuario</label>
+          {{ form.username }}
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-600 mb-1">Contraseña</label>
+          {{ form.password }}
+        </div>
+        <button type="submit" class="btn btn-primary w-full">Ingresar</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

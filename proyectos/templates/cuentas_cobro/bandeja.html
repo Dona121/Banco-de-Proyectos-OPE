@@ -1,0 +1,99 @@
+{% extends "base_app.html" %}
+{% load cuentas_cobro_extras %}
+
+{% block title %}Cuentas de cobro{% endblock %}
+
+{% block app_content %}
+<div x-data="{ flujograma:false }">
+<div class="mb-6 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h1 class="font-head text-2xl font-bold text-slate-800">Cuentas de cobro</h1>
+    <p class="text-sm text-slate-500">{{ paginator.count }} cuenta{{ paginator.count|pluralize }} en total.</p>
+  </div>
+  <div class="flex flex-wrap items-center gap-2">
+    <button type="button" @click="flujograma=true" class="btn btn-outline">Flujograma del proceso</button>
+    {% if puede_crear %}
+    <a href="{% url 'cuentas_cobro:cuenta_nueva' %}" class="btn btn-primary">Nueva cuenta</a>
+    {% endif %}
+  </div>
+</div>
+
+<form method="get" class="card mb-4 flex flex-wrap items-end gap-3 p-4">
+  <div class="min-w-48">
+    <label class="mb-1 block text-xs font-semibold text-slate-500">Contratista</label>
+    <select name="contratista" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 focus:outline-none">
+      <option value="">Todos</option>
+      {% for cid, nombre, uname in contratistas %}
+      <option value="{{ cid }}" {% if f_contratista == cid|stringformat:'s' %}selected{% endif %}>{{ nombre|default:uname }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="min-w-44">
+    <label class="mb-1 block text-xs font-semibold text-slate-500">Estado de revisión</label>
+    <select name="estado" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 focus:outline-none">
+      <option value="">Todos</option>
+      <option value="sin_revisar" {% if f_estado == 'sin_revisar' %}selected{% endif %}>En proceso</option>
+      {% for code, label in estado_choices %}
+      <option value="{{ code }}" {% if f_estado == code %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+      <option value="cerrada" {% if f_estado == 'cerrada' %}selected{% endif %}>Cerrada</option>
+    </select>
+  </div>
+  <div class="flex gap-2">
+    <button class="btn btn-soft">Filtrar</button>
+    <a href="{% url 'cuentas_cobro:bandeja' %}" class="btn btn-outline">Limpiar</a>
+  </div>
+</form>
+
+<div class="card">
+  <div class="table-wrap">
+    <table class="data">
+      <thead>
+        <tr>
+          <th>Cuenta</th><th>Contratista</th><th>Paso actual</th>
+          <th>Paso siguiente</th><th>Tiempo en paso actual</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in cuentas %}
+        <tr>
+          <td class="font-medium text-slate-700">{{ c.vigencia.vigencia }} · {{ c.get_mes_display }}</td>
+          <td class="text-slate-500">{{ c.usuario.get_full_name|default:c.usuario.username }}</td>
+          <td>
+            {% if c.paso.cerrada %}<span class="badge badge-aprobada">Cerrada</span>
+            {% elif c.paso.rechazada %}<span class="badge badge-rechazada">Rechazada</span>
+            {% else %}
+              <span class="font-medium text-slate-700">{{ c.paso.titulo }}</span>
+              {% if c.paso.detalle %}<p class="text-xs text-slate-400">{{ c.paso.detalle }}</p>{% endif %}
+              <p class="text-xs text-slate-400">Responsable: <span class="text-slate-500">{{ c.paso.responsable }}</span></p>
+            {% endif %}
+          </td>
+          <td>
+            {% if c.paso.cerrada or c.paso.rechazada %}<span class="text-slate-400">—</span>
+            {% else %}
+              <span class="font-medium text-slate-700">{{ c.paso.siguiente }}</span>
+              <p class="text-xs text-slate-400">Responsable: <span class="text-slate-500">{{ c.paso.siguiente_responsable }}</span></p>
+            {% endif %}
+          </td>
+          <td class="text-slate-500">
+            {% if c.paso.cerrada %}
+              <span class="text-slate-400">Cerrada el {{ c.paso.desde|date:"d M Y" }}</span>
+            {% else %}
+              hace {{ c.paso.desde|timesince }}
+            {% endif %}
+          </td>
+          <td class="text-right"><a href="{% url 'cuentas_cobro:cuenta_detalle' c.pk %}" class="text-brand font-semibold hover:underline">Ver</a></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="py-10 text-center text-slate-400">No tienes cuentas de cobro.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% include 'components/paginacion.html' %}
+
+{% include 'cuentas_cobro/_flujograma.html' %}
+</div>
+{% endblock %}

@@ -1,0 +1,190 @@
+{% comment %}Flujograma general del proceso de cuentas de cobro (estático: roles + condiciones, en lenguaje sencillo). Se abre como modal con la variable Alpine `flujograma`. Se teletransporta al <body> con x-teleport para no quedar atrapado en el stacking context de <main> (.page anima opacity/transform). Firma de diseño: carril de rol (barra de color a la izquierda) para leer los hand-offs entre roles de un vistazo.{% endcomment %}
+<template x-teleport="body">
+<div x-show="flujograma" x-transition.opacity
+     class="fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-4" style="display:none"
+     @keydown.escape.window="flujograma=false">
+  <div @click.outside="flujograma=false"
+       class="card w-full max-w-2xl max-h-[88vh] overflow-y-auto p-6">
+
+    <!-- Encabezado -->
+    <div class="mb-4 flex items-start justify-between">
+      <div>
+        <h2 class="font-head text-lg font-bold text-slate-800">Flujograma del proceso</h2>
+        <p class="text-xs text-slate-400">Cuenta de cobro · quién hace cada paso</p>
+      </div>
+      <button @click="flujograma=false" class="text-slate-400 hover:text-slate-600" aria-label="Cerrar">
+        <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <!-- Leyenda de roles (el color de la barra de cada paso indica quién lo hace) -->
+    <div class="mb-5 flex flex-wrap gap-x-4 gap-y-1.5 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+      <span class="inline-flex items-center gap-1.5"><span class="h-2.5 w-1 rounded-full bg-azul"></span>Contratista</span>
+      <span class="inline-flex items-center gap-1.5"><span class="h-2.5 w-1 rounded-full bg-ambar"></span>Radicación</span>
+      <span class="inline-flex items-center gap-1.5"><span class="h-2.5 w-1 rounded-full bg-brand"></span>Supervisor</span>
+      <span class="inline-flex items-center gap-1.5"><span class="h-2.5 w-1 rounded-full bg-slate-500"></span>Revisores</span>
+      <span class="inline-flex items-center gap-1.5"><span class="h-2.5 w-1 rounded-full bg-slate-800"></span>Secop</span>
+      <span class="inline-flex items-center gap-1.5"><span class="h-3 w-3 rotate-45 rounded-[2px] border border-ambar bg-ambar-light"></span>Decisión</span>
+    </div>
+
+    <div class="text-sm">
+
+      <!-- 01 -->
+      <div class="rounded-lg border border-slate-200 border-l-4 border-l-azul bg-white px-4 py-3 shadow-sm">
+        <div class="mb-0.5 flex items-center justify-between">
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-azul">Contratista</span>
+          <span class="text-[10px] font-bold text-slate-300">PASO 01</span>
+        </div>
+        <p class="text-slate-700">Crea la cuenta de cobro del mes.</p>
+      </div>
+      {% include 'cuentas_cobro/_flecha.html' %}
+
+      <!-- 02 -->
+      <div class="rounded-lg border border-slate-200 border-l-4 border-l-azul bg-white px-4 py-3 shadow-sm">
+        <div class="mb-0.5 flex items-center justify-between">
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-azul">Contratista</span>
+          <span class="text-[10px] font-bold text-slate-300">PASO 02</span>
+        </div>
+        <p class="text-slate-700">Sube los documentos que se le piden.</p>
+      </div>
+      {% include 'cuentas_cobro/_flecha.html' %}
+
+      <!-- Decisión: completitud -->
+      <div class="rounded-lg border border-ambar/50 bg-ambar-light px-4 py-3 shadow-sm">
+        <div class="mb-1 flex items-center gap-2">
+          <span class="inline-block h-3 w-3 rotate-45 rounded-[2px] bg-ambar"></span>
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-ambar-dark">Decisión</span>
+        </div>
+        <p class="font-semibold text-slate-800">¿Están todos los documentos?</p>
+        <div class="mt-2 flex flex-wrap gap-2 text-xs">
+          <span class="rounded-full bg-rojo-light px-2 py-0.5 font-medium text-rojo">Faltan → sigue subiendo</span>
+          <span class="rounded-full bg-brand-light px-2 py-0.5 font-medium text-brand-dark">Completos → continúa</span>
+        </div>
+      </div>
+      {% include 'cuentas_cobro/_flecha.html' %}
+
+      <!-- 03 -->
+      <div class="rounded-lg border border-slate-200 border-l-4 border-l-azul bg-white px-4 py-3 shadow-sm">
+        <div class="mb-0.5 flex items-center justify-between">
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-azul">Contratista</span>
+          <span class="text-[10px] font-bold text-slate-300">PASO 03</span>
+        </div>
+        <p class="text-slate-700">Cuando están todos, presiona <strong>Entregar</strong> para mandarlos a revisión.</p>
+      </div>
+      {% include 'cuentas_cobro/_flecha.html' %}
+
+      <!-- Decisión: radicación -->
+      <div class="rounded-lg border border-ambar/50 bg-ambar-light px-4 py-3 shadow-sm">
+        <div class="mb-1 flex items-center gap-2">
+          <span class="inline-block h-3 w-3 rotate-45 rounded-[2px] bg-ambar"></span>
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-ambar-dark">Decisión · Supervisor o Radicación</span>
+        </div>
+        <p class="font-semibold text-slate-800">Primera revisión de los documentos</p>
+        <div class="mt-2 space-y-1.5 text-xs text-slate-700">
+          <p><span class="mr-1 rounded-full bg-brand-light px-2 py-0.5 font-medium text-brand-dark">Aprobado</span>los documentos están bien y la cuenta sigue adelante.</p>
+          <p><span class="mr-1 rounded-full bg-ambar-light px-2 py-0.5 font-medium text-ambar-dark ring-1 ring-ambar/40">Requiere ajustes</span>hay que corregir; vuelve al contratista.</p>
+          <p><span class="mr-1 rounded-full bg-rojo-light px-2 py-0.5 font-medium text-rojo">Rechazado</span>algún documento no corresponde y se deja anotado.</p>
+        </div>
+      </div>
+      {% include 'cuentas_cobro/_flecha.html' %}
+
+      <!-- 04 -->
+      <div class="rounded-lg border border-slate-200 border-l-4 border-l-brand bg-white px-4 py-3 shadow-sm">
+        <div class="mb-0.5 flex items-center justify-between">
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-brand-dark">Supervisor</span>
+          <span class="text-[10px] font-bold text-slate-300">PASO 04</span>
+        </div>
+        <p class="text-slate-700">Elige a las tres personas que van a revisar: la jurídica, la administrativa y la técnica.</p>
+      </div>
+      {% include 'cuentas_cobro/_flecha.html' %}
+
+      <!-- 05 Revisión secuencial + devolución -->
+      <div class="rounded-lg border border-slate-200 border-l-4 border-l-slate-500 bg-white px-4 py-3 shadow-sm">
+        <div class="mb-1 flex items-center justify-between">
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Revisores · uno después de otro</span>
+          <span class="text-[10px] font-bold text-slate-300">PASO 05</span>
+        </div>
+        <p class="mb-2 text-slate-700">Revisan en orden. Cada persona revisa solo cuando la anterior ya aprobó.</p>
+        <ol class="space-y-1 text-xs text-slate-600">
+          <li><strong>1.</strong> Primero la revisión jurídica.</li>
+          <li><strong>2.</strong> Luego la administrativa.</li>
+          <li><strong>3.</strong> Por último la técnica.</li>
+        </ol>
+      </div>
+
+      <!-- Lazo de devolución -->
+      <div class="my-1.5 flex items-center justify-center gap-2 text-rojo" aria-hidden="true">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3"/></svg>
+        <span class="text-[11px] font-semibold uppercase tracking-wide">Si piden correcciones</span>
+      </div>
+      <div class="rounded-lg border border-dashed border-rojo/50 bg-rojo-light px-4 py-3 text-xs text-rojo">
+        Si alguna de las tres personas pide ajustes o no aprueba, la cuenta vuelve al contratista. Él corrige, sube otra vez todos los documentos y la revisión empieza de nuevo desde la primera persona.
+      </div>
+      {% include 'cuentas_cobro/_flecha.html' %}
+
+      <!-- Sistema: revisores aprobaron -->
+      <div class="rounded-lg border border-slate-200 border-l-4 border-l-slate-300 bg-slate-50 px-4 py-3">
+        <span class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Sistema</span>
+        <p class="text-slate-700">Cuando las tres personas aprueban, la cuenta pasa a la decisión del supervisor.</p>
+      </div>
+      {% include 'cuentas_cobro/_flecha.html' %}
+
+      <!-- Decisión: supervisor -->
+      <div class="rounded-lg border border-ambar/50 bg-ambar-light px-4 py-3 shadow-sm">
+        <div class="mb-1 flex items-center gap-2">
+          <span class="inline-block h-3 w-3 rotate-45 rounded-[2px] bg-ambar"></span>
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-ambar-dark">Decisión · Supervisor</span>
+        </div>
+        <p class="font-semibold text-slate-800">Decisión final del supervisor</p>
+        <div class="mt-2 space-y-1 text-xs text-slate-700">
+          <p><span class="mr-1 rounded-full bg-brand-light px-2 py-0.5 font-medium text-brand-dark">Aprobado</span>da el visto bueno para firmar los documentos de cierre.</p>
+          <p><span class="mr-1 rounded-full bg-rojo-light px-2 py-0.5 font-medium text-rojo">Rechazado</span>la cuenta no continúa. <strong>Fin.</strong></p>
+        </div>
+      </div>
+      {% include 'cuentas_cobro/_flecha.html' %}
+
+      <!-- 06 -->
+      <div class="rounded-lg border border-slate-200 border-l-4 border-l-azul bg-white px-4 py-3 shadow-sm">
+        <div class="mb-0.5 flex items-center justify-between">
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-azul">Contratista</span>
+          <span class="text-[10px] font-bold text-slate-300">PASO 06</span>
+        </div>
+        <p class="text-slate-700">Sube los documentos de cierre: el informe de supervisión y el certificado de cumplimiento.</p>
+      </div>
+      {% include 'cuentas_cobro/_flecha.html' %}
+
+      <!-- 07 Trámites finales -->
+      <div class="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <div class="mb-2 flex items-center justify-between">
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Pasos finales · uno después de otro (cada uno con su soporte)</span>
+          <span class="text-[10px] font-bold text-slate-300">PASO 07</span>
+        </div>
+        <div class="space-y-1.5">
+          <div class="rounded-md border-l-4 border-l-ambar bg-slate-50 px-3 py-2">
+            <span class="text-[11px] font-semibold uppercase tracking-wide text-ambar-dark">Radicación</span>
+            <p class="text-xs text-slate-700">Confirma que los documentos firmados se le entregaron al contratista.</p>
+          </div>
+          <p class="text-center text-[10px] text-slate-400">y después</p>
+          <div class="rounded-md border-l-4 border-l-slate-500 bg-slate-50 px-3 py-2">
+            <span class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Revisor administrativo</span>
+            <p class="text-xs text-slate-700">Confirma que la cuenta se subió al sistema SIIFWEB.</p>
+          </div>
+          <p class="text-center text-[10px] text-slate-400">y después</p>
+          <div class="rounded-md border-l-4 border-l-slate-800 bg-slate-50 px-3 py-2">
+            <span class="text-[11px] font-semibold uppercase tracking-wide text-slate-700">Secop</span>
+            <p class="text-xs text-slate-700">Confirma que la cuenta se publicó en el portal SECOP II.</p>
+          </div>
+        </div>
+      </div>
+      {% include 'cuentas_cobro/_flecha.html' %}
+
+      <!-- Cierre -->
+      <div class="rounded-lg border border-brand/40 bg-brand-light px-4 py-3">
+        <span class="text-[11px] font-semibold uppercase tracking-wide text-brand-dark">Sistema</span>
+        <p class="font-medium text-brand-dark">Cuando se cumplen los tres pasos finales, la cuenta se cierra sola. Fin del proceso.</p>
+      </div>
+
+    </div>
+  </div>
+</div>
+</template>

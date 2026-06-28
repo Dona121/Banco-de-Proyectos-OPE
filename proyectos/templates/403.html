@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Acceso denegado{% endblock %}
+{% block body %}
+<div class="min-h-full grid place-items-center p-6">
+  <div class="text-center max-w-md">
+    <p class="font-head text-6xl font-extrabold text-brand">403</p>
+    <h1 class="mt-2 font-head text-xl font-bold text-slate-800">No tienes permiso para esta sección</h1>
+    <p class="mt-2 text-sm text-slate-500">{{ exception }}</p>
+    <a href="{% url 'web:dashboard' %}" class="btn btn-primary mt-6">Volver al inicio</a>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,109 @@
+{% extends "base_app.html" %}
+{% load web_extras humanize %}
+
+{% block title %}Inicio · Panel del Director{% endblock %}
+
+{% block app_content %}
+<div class="mb-6">
+  <p class="text-xs font-semibold uppercase tracking-wide text-brand">Panel ejecutivo</p>
+  <h1 class="font-head text-2xl font-bold text-slate-800">Hola, {{ user.first_name|default:user.username }}</h1>
+  <p class="text-sm text-slate-500">Monitoreo general de coordinadores, proyectos y entregas.</p>
+</div>
+
+<!-- KPIs -->
+<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+  <div class="card kpi rise rise-1 p-5 flex items-center gap-4">
+    <span class="icon-chip chip-brand shrink-0"><svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"/></svg></span>
+    <div><p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Proyectos</p><p class="font-head text-3xl font-bold text-slate-800 leading-tight">{{ total_proyectos }}</p></div>
+  </div>
+  <div class="card kpi kpi-azul rise rise-2 p-5 flex items-center gap-4">
+    <span class="icon-chip chip-azul shrink-0"><svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></svg></span>
+    <div><p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Coordinadores</p><p class="font-head text-3xl font-bold text-slate-800 leading-tight">{{ total_coordinadores }}</p></div>
+  </div>
+  <div class="card kpi kpi-ambar rise rise-3 p-5 flex items-center gap-4">
+    <span class="icon-chip chip-ambar shrink-0"><svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg></span>
+    <div><p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Pend. de revisión</p><p class="font-head text-3xl font-bold text-slate-800 leading-tight">{{ pendientes_count }}</p>
+      {% if pendientes_atrasadas %}<p class="text-[11px] font-semibold text-ambar">{{ pendientes_atrasadas }} con +{{ umbral_atraso }} días</p>{% endif %}</div>
+  </div>
+  <div class="card kpi kpi-rojo rise rise-4 p-5 flex items-center gap-4">
+    <span class="icon-chip chip-rojo shrink-0"><svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg></span>
+    <div><p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Vencidas</p><p class="font-head text-3xl font-bold leading-tight {% if vencidas_count %}text-rojo{% else %}text-slate-800{% endif %}">{{ vencidas_count }}</p></div>
+  </div>
+</div>
+
+<div class="mt-6 grid gap-6 lg:grid-cols-3">
+  <!-- Estado -->
+  <div class="card p-5">
+    <h2 class="font-head font-semibold text-slate-800 mb-4">Actividades por estado</h2>
+    {% include 'components/estado_bar.html' %}
+  </div>
+  <!-- Cumplimiento por proyecto -->
+  <div class="card p-5 lg:col-span-2">
+    <h2 class="font-head font-semibold text-slate-800 mb-4">Cumplimiento por proyecto</h2>
+    <div class="space-y-3.5">
+      {% for c in cumplimiento %}
+      <a href="{% url 'web:proyecto_detalle' c.proyecto.pk %}" class="block group">
+        <div class="flex items-center justify-between gap-3 text-sm mb-1">
+          <span class="truncate font-medium text-slate-700 group-hover:text-brand">{{ c.proyecto.nombre }}</span>
+          <span class="shrink-0 text-slate-400">{{ c.aprobadas }}/{{ c.total }} · <span class="font-semibold text-slate-600">{{ c.pct }}%</span></span>
+        </div>
+        <div class="progress"><span style="width: {{ c.pct }}%"></span></div>
+      </a>
+      {% empty %}
+      <p class="py-6 text-center text-sm text-slate-400">Sin proyectos todavía.</p>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="mt-6 grid gap-6 lg:grid-cols-2">
+  <!-- Ranking coordinadores -->
+  <div class="card p-5">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="font-head font-semibold text-slate-800">Resumen por coordinador</h2>
+      <span class="text-xs text-slate-400">Ordenado por pendientes</span>
+    </div>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Coordinador</th><th class="text-center">Proy.</th><th class="text-center">Activ.</th><th class="text-center">Pend.</th></tr></thead>
+        <tbody>
+          {% for c in coordinadores %}
+          <tr>
+            <td class="font-medium text-slate-700">{{ c.coordinador.get_full_name|default:c.coordinador.username }}</td>
+            <td class="text-center text-slate-500">{{ c.proyectos }}</td>
+            <td class="text-center text-slate-500">{{ c.actividades }}</td>
+            <td class="text-center"><span class="badge {% if c.pendientes %}badge-ajustes{% else %}badge-aprobada{% endif %}">{{ c.pendientes }}</span></td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="4" class="py-8 text-center text-slate-400">Sin coordinadores asignados.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Entregas pendientes de revisión -->
+  <div class="card p-5">
+    <h2 class="font-head font-semibold text-slate-800 mb-3">Entregas pendientes de revisión</h2>
+    <div class="divide-y divide-slate-100">
+      {% for f in pendientes %}
+      <a href="{% url 'web:entrega_detalle' f.entrega.pk %}" class="flex items-center justify-between gap-3 py-3 -mx-2 px-2 rounded-lg hover:bg-slate-50">
+        <div class="min-w-0">
+          <p class="truncate font-medium text-slate-700">{{ f.entrega.actividad.nombre }} · v{{ f.entrega.numero_version }}</p>
+          <p class="truncate text-xs text-slate-400">{{ f.entrega.actividad.proyecto.asignado_a.get_full_name|default:f.entrega.actividad.proyecto.asignado_a.username }}</p>
+        </div>
+        <span class="badge shrink-0 {% if f.atrasada %}badge-rechazada{% else %}badge-pendiente{% endif %}">{{ f.dias }} día{{ f.dias|pluralize }}</span>
+      </a>
+      {% empty %}
+      <p class="py-8 text-center text-sm text-slate-400">No hay entregas esperando revisión.</p>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<!-- Vencidas / próximas -->
+<div class="mt-6 grid gap-6 lg:grid-cols-2">
+  {% include 'components/lista_actividades.html' with titulo='Actividades vencidas' items=vencidas vacio='Sin actividades vencidas.' alerta=1 %}
+  {% include 'components/lista_actividades.html' with titulo='Próximas a vencer' items=proximas vacio='Sin vencimientos próximos.' %}
+</div>
+{% endblock %}

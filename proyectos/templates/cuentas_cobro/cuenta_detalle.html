@@ -1,0 +1,361 @@
+{% extends "base_app.html" %}
+{% load cuentas_cobro_extras humanize %}
+
+{% block title %}Cuenta {{ cuenta.vigencia.vigencia }} · {{ cuenta.get_mes_display }}{% endblock %}
+
+{% block app_content %}
+<div x-data="{ flujo:false }">
+<!-- Encabezado --------------------------------------------------------------->
+<div class="card p-6 mb-6">
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <div>
+      <p class="text-xs font-semibold uppercase tracking-wide text-azul">Cuenta de cobro</p>
+      <h1 class="mt-1 font-head text-2xl font-bold text-slate-800">
+        {{ cuenta.vigencia.vigencia }} · {{ cuenta.get_mes_display }}
+      </h1>
+      <p class="text-sm text-slate-500">
+        Contratista: {{ cuenta.usuario.get_full_name|default:cuenta.usuario.username }}
+      </p>
+    </div>
+    <div class="flex items-center gap-2">
+      <button @click="flujo=true" class="btn btn-outline">Información flujo de cuenta</button>
+      <a href="{% url 'cuentas_cobro:bandeja' %}" class="btn btn-outline">Volver</a>
+    </div>
+  </div>
+
+  <div class="mt-4 flex flex-wrap items-center gap-2 text-sm">
+    <span class="text-slate-500">Revisores:</span> {% cc_badge cuenta.estado_revisores "En proceso" %}
+    <span class="ml-3 text-slate-500">Supervisor:</span> {% cc_badge cuenta.estado_supervisor "Pendiente" %}
+    {% if cuenta.fecha_radicacion %}<span class="ml-3 text-slate-500">Radicada {{ cuenta.fecha_radicacion|date:"d M Y" }}</span>{% endif %}
+    {% if cuenta.fecha_cierre %}<span class="badge badge-aprobada ml-3">Cerrada {{ cuenta.fecha_cierre|date:"d M Y" }}</span>{% endif %}
+  </div>
+</div>
+
+<div class="grid gap-6 lg:grid-cols-3">
+  <!-- Columna principal ----------------------------------------------------->
+  <div class="lg:col-span-2 space-y-6">
+
+    <!-- Documentos de la última entrega -->
+    <div class="card p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-head font-semibold text-slate-800">
+          Documentos {% if entrega %}<span class="text-slate-400 text-sm font-normal">· versión {{ entrega.numero_version }}</span>{% endif %}
+        </h2>
+        {% if entrega_enviada and not cuenta.fecha_radicacion %}
+        <span class="badge badge-revision">Entregado · en espera de radicación</span>
+        {% endif %}
+      </div>
+
+      {% if faltantes %}
+      <div class="mb-4 rounded-lg border border-ambar/30 bg-ambar-light px-4 py-3 text-sm text-ambar-dark">
+        Faltan documentos obligatorios:
+        {% for t in faltantes %}<strong>{{ t.nombre }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}.
+      </div>
+      {% endif %}
+
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>Tipo</th><th>Estado</th><th>Archivo</th>{% if puede_marcar_docs %}<th>Revisar</th>{% endif %}</tr></thead>
+          <tbody>
+            {% for d in documentos %}
+            <tr>
+              <td class="font-medium text-slate-700">{{ d.tipo_documento.nombre }}
+                {% if d.comentario %}<p class="text-xs text-slate-400">{{ d.comentario }}</p>{% endif %}
+              </td>
+              <td>{% cc_badge d.estado %}</td>
+              <td><a href="{{ d.documento.url }}" target="_blank" class="text-brand font-semibold hover:underline">Abrir</a></td>
+              {% if puede_marcar_docs %}
+              <td>
+                <form method="post" action="{% url 'cuentas_cobro:documento_revisar' d.pk %}" class="flex items-center gap-2">
+                  {% csrf_token %}
+                  <select name="estado" class="rounded-lg border border-slate-300 bg-white py-1.5 px-2 text-xs focus:border-brand focus:ring-2 focus:ring-brand/30 focus:outline-none">
+                    {% for code, label in estado_doc_choices %}
+                    <option value="{{ code }}" {% if code == d.estado %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                  <input name="comentario" value="{{ d.comentario }}" placeholder="Comentario"
+                         class="w-32 rounded-lg border border-slate-300 bg-white py-1.5 px-2 text-xs focus:border-brand focus:ring-2 focus:ring-brand/30 focus:outline-none">
+                  <button class="btn btn-soft px-2 py-1 text-xs">Guardar</button>
+                </form>
+              </td>
+              {% endif %}
+            </tr>
+            {% empty %}
+            <tr><td colspan="{% if puede_marcar_docs %}4{% else %}3{% endif %}" class="py-8 text-center text-slate-400">Sin documentos cargados.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if puede_cargar and faltantes %}
+      <form method="post" action="{% url 'cuentas_cobro:documento_cargar' cuenta.pk %}" enctype="multipart/form-data"
+            class="mt-5 border-t border-slate-100 pt-5 grid gap-4 sm:grid-cols-2">
+        {% csrf_token %}
+        {% include 'components/form_field.html' with field=doc_form.tipo_documento %}
+        {% include 'components/form_field.html' with field=doc_form.documento %}
+        <div class="sm:col-span-2"><button class="btn btn-soft">Cargar documento</button></div>
+      </form>
+      {% endif %}
+
+      {% if puede_entregar %}
+      <form method="post" action="{% url 'cuentas_cobro:entregar' cuenta.pk %}"
+            class="mt-5 border-t border-slate-100 pt-5 flex items-center justify-between gap-4">
+        {% csrf_token %}
+        <p class="text-sm text-slate-600">Cargaste todos los documentos obligatorios. Envíalos a revisión.</p>
+        <button class="btn btn-primary">Entregar</button>
+      </form>
+      {% elif puede_cargar and entrega_enviada %}
+      <p class="mt-5 border-t border-slate-100 pt-5 text-sm text-brand-dark">
+        Entregado. A la espera de la revisión de radicación.
+      </p>
+      {% endif %}
+    </div>
+
+    <!-- Radicación -->
+    <div class="card p-6">
+      <h2 class="font-head font-semibold text-slate-800 mb-4">Radicación</h2>
+      {% if radicaciones %}
+      <ul class="space-y-2 mb-4">
+        {% for r in radicaciones %}
+        <li class="flex items-center gap-3 text-sm">
+          {% cc_badge r.resultado %}
+          <span class="text-slate-600">{{ r.comentario }}</span>
+          <span class="ml-auto text-xs text-slate-400">{{ r.fecha_creacion|naturaltime }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if puede_radicar %}
+      <form method="post" action="{% url 'cuentas_cobro:radicacion' cuenta.pk %}" class="space-y-4 border-t border-slate-100 pt-4">
+        {% csrf_token %}
+        {% include 'components/form_field.html' with field=radicacion_form.resultado %}
+        {% include 'components/form_field.html' with field=radicacion_form.comentario %}
+        <button class="btn btn-primary">Registrar decisión de radicación</button>
+      </form>
+      {% elif not cuenta.fecha_radicacion %}
+      <p class="text-sm text-slate-400">A la espera de la entrega del contratista y la aprobación de radicación.</p>
+      {% endif %}
+    </div>
+
+    <!-- Revisión secuencial -->
+    <div class="card p-6">
+      <h2 class="font-head font-semibold text-slate-800 mb-4">Revisión (jurídico → administrativo → técnico)</h2>
+      <div class="space-y-3">
+        {% for fila in tablero %}
+        <div class="rounded-lg border border-slate-100 p-4">
+          <div class="flex flex-wrap items-center gap-3">
+            <span class="font-semibold text-slate-700">{{ fila.rol_label }}</span>
+            {% if fila.revision %}{% cc_badge fila.revision.resultado %}
+            {% elif fila.habilitado %}<span class="badge badge-revision">En turno</span>
+            {% else %}<span class="badge badge-pendiente">En espera</span>{% endif %}
+            {% if fila.asignacion %}
+            <span class="ml-auto text-xs text-slate-400">
+              {{ fila.asignacion.revisor.get_full_name|default:fila.asignacion.revisor.username }}
+            </span>
+            {% else %}
+            <span class="ml-auto text-xs text-rojo">Sin asignar</span>
+            {% endif %}
+          </div>
+          {% if fila.revision and fila.revision.comentario %}
+          <p class="mt-2 text-sm text-slate-500">{{ fila.revision.comentario }}</p>
+          {% endif %}
+
+          {% if puede_asignar and not fila.asignacion %}
+          <form method="post" action="{% url 'cuentas_cobro:asignar' cuenta.pk %}" class="mt-3 flex flex-wrap items-end gap-2">
+            {% csrf_token %}
+            <input type="hidden" name="rol" value="{{ fila.rol }}">
+            <div class="min-w-48">{{ asignacion_form.revisor }}</div>
+            <button class="btn btn-soft px-3 py-1.5 text-sm">Asignar</button>
+          </form>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Decisión del supervisor -->
+    {% if puede_decidir or cuenta.estado_supervisor %}
+    <div class="card p-6">
+      <h2 class="font-head font-semibold text-slate-800 mb-1">Decisión final del supervisor</h2>
+      <p class="text-xs text-slate-400 mb-4">Aprobación para la firma de los documentos de cierre.</p>
+      {% if cuenta.estado_supervisor %}
+      <div class="flex items-center gap-3">{% cc_badge cuenta.estado_supervisor %}<span class="text-sm text-slate-600">{{ cuenta.comentario }}</span></div>
+      {% elif puede_decidir %}
+      <form method="post" action="{% url 'cuentas_cobro:decision' cuenta.pk %}" class="space-y-4">
+        {% csrf_token %}
+        {% include 'components/form_field.html' with field=decision_form.resultado %}
+        {% include 'components/form_field.html' with field=decision_form.comentario %}
+        <button class="btn btn-primary">Registrar decisión</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Documentos de cierre (los carga el contratista) -->
+    {% if cuenta.estado_supervisor == 'AP' %}
+    <div class="card p-6">
+      <h2 class="font-head font-semibold text-slate-800 mb-4">Documentos de cierre</h2>
+      <ul class="space-y-2 mb-4">
+        {% for d in docs_cierre %}
+        <li class="flex items-center gap-3 text-sm">
+          <span class="font-medium text-slate-700">{{ d.get_tipo_display }}</span>
+          <a href="{{ d.documento.url }}" target="_blank" class="text-brand font-semibold hover:underline">Abrir</a>
+          <span class="ml-auto text-xs text-slate-400">{{ d.fecha_creacion|naturaltime }}</span>
+        </li>
+        {% empty %}
+        <li class="text-sm text-slate-400">Aún no hay documentos de cierre.</li>
+        {% endfor %}
+      </ul>
+      {% if puede_cargar_cierre %}
+      <form method="post" action="{% url 'cuentas_cobro:cierre_cargar' cuenta.pk %}" enctype="multipart/form-data"
+            class="grid gap-4 sm:grid-cols-2 border-t border-slate-100 pt-4">
+        {% csrf_token %}
+        {% include 'components/form_field.html' with field=cierre_form.tipo %}
+        {% include 'components/form_field.html' with field=cierre_form.documento %}
+        <div class="sm:col-span-2"><button class="btn btn-soft">Cargar documento de cierre</button></div>
+      </form>
+      {% if cierre_faltantes %}
+      <p class="mt-3 text-xs text-slate-400">
+        Faltan: {% for t in cierre_faltantes %}{{ t.label }}{% if not forloop.last %}, {% endif %}{% endfor %}.
+      </p>
+      {% endif %}
+      {% endif %}
+    </div>
+
+    <!-- Trámites finales -->
+    <div class="card p-6">
+      <h2 class="font-head font-semibold text-slate-800 mb-4">Trámites finales</h2>
+      <div class="space-y-3">
+        {% for f in tramites %}
+        <div class="rounded-lg border border-slate-100 p-4">
+          <div class="flex flex-wrap items-center gap-3">
+            <span class="font-semibold text-slate-700">{{ f.tipo_label }}</span>
+            {% if f.realizado %}<span class="badge badge-aprobada">Realizado</span>
+            {% elif f.habilitado %}<span class="badge badge-revision">En turno</span>
+            {% else %}<span class="badge badge-pendiente">En espera</span>{% endif %}
+          </div>
+          <p class="mt-1 text-sm text-slate-500">{{ f.pregunta }}</p>
+          {% if f.realizado and f.tramite %}
+            {% if f.tramite.comentario %}<p class="mt-1 text-xs text-slate-400">{{ f.tramite.comentario }}</p>{% endif %}
+            {% if f.tramite.evidencia %}<a href="{{ f.tramite.evidencia.url }}" target="_blank" class="text-brand text-sm font-semibold hover:underline">Ver evidencia</a>{% endif %}
+          {% elif f.puede %}
+          <form method="post" action="{% url 'cuentas_cobro:tramite' cuenta.pk f.tipo %}" enctype="multipart/form-data"
+                class="mt-3 space-y-3 border-t border-slate-100 pt-3">
+            {% csrf_token %}
+            {% include 'components/form_field.html' with field=tramite_form.evidencia %}
+            {% include 'components/form_field.html' with field=tramite_form.comentario %}
+            <button class="btn btn-primary">Marcar como realizado</button>
+          </form>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Columna lateral ------------------------------------------------------->
+  <div class="space-y-6">
+    <!-- Mis asignaciones (revisor) -->
+    {% if mis_asignaciones %}
+    <div class="card p-6">
+      <h2 class="font-head font-semibold text-slate-800 mb-4">Mi revisión</h2>
+      {% for item in mis_asignaciones %}
+      <div class="mb-4 last:mb-0">
+        <p class="text-sm font-semibold text-slate-700">{{ item.asignacion.get_rol_display }}</p>
+        {% if item.puede %}
+        <form method="post" action="{% url 'cuentas_cobro:revisar' item.asignacion.pk %}" class="mt-2 space-y-3">
+          {% csrf_token %}
+          {% include 'components/form_field.html' with field=revision_form.resultado %}
+          {% include 'components/form_field.html' with field=revision_form.comentario %}
+          <button class="btn btn-primary w-full">Registrar revisión</button>
+        </form>
+        {% else %}
+        <p class="text-xs text-slate-400 mt-1">Aún no es tu turno o ya revisaste esta versión.</p>
+        {% endif %}
+        <form method="post" action="{% url 'cuentas_cobro:declinar' item.asignacion.pk %}" class="mt-3 space-y-2"
+              x-data="{ open:false }">
+          {% csrf_token %}
+          <button type="button" @click="open=!open" class="text-xs text-rojo hover:underline">No puedo revisar</button>
+          <div x-show="open" style="display:none" class="space-y-2">
+            {% include 'components/form_field.html' with field=declinar_form.motivo %}
+            <button class="btn btn-rojo px-3 py-1.5 text-sm">Declinar asignación</button>
+          </div>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Historial / trazabilidad -->
+    <div class="card p-6" x-data="{ soloDev:false }">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-head font-semibold text-slate-800">Historial</h2>
+        {% if hay_devoluciones %}
+        <label class="flex items-center gap-2 text-xs text-slate-500 cursor-pointer">
+          <input type="checkbox" x-model="soloDev" class="rounded border-slate-300 text-rojo focus:ring-rojo/30">
+          Solo devoluciones
+        </label>
+        {% endif %}
+      </div>
+      {% if eventos %}
+      <ol class="relative ml-1 space-y-4 border-l-2 border-slate-100 pl-6">
+        {% for e in eventos %}
+        <li class="relative {% if e.es_devolucion %}rounded-lg border border-rojo/30 bg-rojo-light px-3 py-2{% endif %}"
+            {% if not e.es_devolucion %}x-show="!soloDev"{% endif %}>
+          <span class="absolute top-1 h-3 w-3 rounded-full ring-2 ring-white
+            {% if e.es_devolucion %}bg-rojo -left-[2.05rem]{% else %}bg-azul -left-[1.85rem]{% endif %}"></span>
+          <p class="text-sm font-medium {% if e.es_devolucion %}text-rojo{% else %}text-slate-700{% endif %}">{{ e.evento }}</p>
+          {% if e.detalle %}<p class="text-xs text-slate-500">{{ e.detalle }}</p>{% endif %}
+          <p class="text-xs text-slate-400">
+            {{ e.actor.get_full_name|default:e.actor.username }} · {{ e.fecha_creacion|naturaltime }}
+          </p>
+        </li>
+        {% endfor %}
+      </ol>
+      {% else %}
+      <p class="text-sm text-slate-400">Sin eventos todavía.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Información flujo de cuenta (stepper, §10) ---------------------->
+<template x-teleport="body">
+<div x-show="flujo" x-transition.opacity class="fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-4" style="display:none"
+     @keydown.escape.window="flujo=false">
+  <div @click.outside="flujo=false"
+       class="card w-full max-w-lg max-h-[85vh] overflow-y-auto p-6">
+    <div class="flex items-start justify-between mb-1">
+      <h2 class="font-head text-lg font-bold text-slate-800">Flujo de la cuenta</h2>
+      <button @click="flujo=false" class="text-slate-400 hover:text-slate-600" aria-label="Cerrar">
+        <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <p class="text-xs text-slate-400 mb-5">La etapa actual aparece resaltada.</p>
+    <ol class="relative ml-2 space-y-5 border-l-2 border-slate-100 pl-6">
+      {% for e in flujo %}
+      <li class="relative">
+        <span class="absolute -left-[31px] top-0.5 grid h-5 w-5 place-items-center rounded-full ring-4 ring-white
+          {% if e.estado == 'hecha' %}bg-brand
+          {% elif e.estado == 'actual' %}bg-azul ring-azul/20
+          {% elif e.estado == 'rechazada' %}bg-rojo
+          {% else %}bg-slate-300{% endif %}">
+          {% if e.estado == 'hecha' %}
+          <svg class="h-3 w-3 text-white" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+          {% endif %}
+        </span>
+        <p class="text-sm font-semibold
+          {% if e.estado == 'actual' %}text-azul
+          {% elif e.estado == 'rechazada' %}text-rojo
+          {% elif e.estado == 'futura' %}text-slate-400
+          {% else %}text-slate-700{% endif %}">{{ e.titulo }}</p>
+        {% if e.detalle %}<p class="text-xs text-slate-500">{{ e.detalle }}</p>{% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+  </div>
+</div>
+</template>
+</div>
+{% endblock %}
