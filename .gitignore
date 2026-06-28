@@ -31,6 +31,7 @@ proyectos/media/
 
 # Estáticos recolectados (collectstatic)
 /staticfiles/
+proyectos/staticfiles/
 /static_root/
 
 # ---- Variables de entorno / secretos ----

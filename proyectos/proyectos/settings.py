@@ -52,6 +52,9 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # WhiteNoise sirve los estáticos también con DEBUG=False (debe ir justo
+    # después de SecurityMiddleware y antes del resto).
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -81,6 +84,40 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'proyectos.wsgi.application'
+
+
+AWS_ACCESS_KEY_ID = os.getenv("SUPABASE_S3_ACCESS_KEY")
+AWS_SECRET_ACCESS_KEY = os.getenv("SUPABASE_S3_SECRET_KEY")
+AWS_STORAGE_BUCKET_NAME = "documentos"
+
+
+AWS_S3_ENDPOINT_URL = "https://jzuhwyxzxnqosgfmpxhy.storage.supabase.co/storage/v1/s3"
+AWS_S3_REGION_NAME = "us-east-1"
+
+# Supabase exige path-style + firma v4
+AWS_S3_ADDRESSING_STYLE = "path"
+AWS_S3_SIGNATURE_VERSION = "s3v4"
+
+# Bucket privado -> URLs firmadas (default). No lo pongas en False para docs sensibles.
+AWS_QUERYSTRING_AUTH = True
+AWS_QUERYSTRING_EXPIRE = 3600  # segundos de validez del link firmado
+
+# Evita que dos archivos con el mismo nombre se sobreescriban silenciosamente
+AWS_S3_FILE_OVERWRITE = False
+
+STORAGES = {
+    "default": {
+        "BACKEND": "storages.backends.s3.S3Storage",
+        "OPTIONS": {
+            "bucket_name": AWS_STORAGE_BUCKET_NAME,
+            "location": "media",  # prefijo dentro del bucket
+        },
+    },
+    "staticfiles": {
+        # WhiteNoise: comprime y versiona los estáticos (cache-busting).
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 
 # Database
@@ -132,6 +169,9 @@ STATIC_URL = 'static/'
 STATICFILES_DIRS = [
     BASE_DIR / "static",
 ]
+
+# Carpeta donde collectstatic reúne los estáticos para que WhiteNoise los sirva.
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 CSRF_TRUSTED_ORIGINS = [
     "https://chase-nondrinkable-editorially.ngrok-free.dev"
