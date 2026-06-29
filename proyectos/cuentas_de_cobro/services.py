@@ -50,7 +50,6 @@ SECUENCIA_ROLES = [
 
 # Orden estricto de los trámites finales.
 SECUENCIA_TRAMITES = [
-    TramiteFinal.Tipo.ENTREGA_CIERRE,
     TramiteFinal.Tipo.CARGUE_SIIFWEB,
     TramiteFinal.Tipo.CARGUE_SECOP,
 ]
@@ -84,8 +83,7 @@ class Eventos:
     SUP_APROBADO = "Aprobado por supervisor (para firma de documentos de cierre)"
     SUP_RECHAZADO = "Rechazado por supervisor"
 
-    CIERRE_CARGADOS = "Documentos de cierre cargados"
-    TF_ENTREGA = "Entrega de documentos de cierre registrada"
+    CIERRE_CARGADOS = "Documentos de cierre firmados cargados"
     TF_SIIFWEB = "Cargue en SIIFWEB registrado"
     TF_SECOP = "Cargue en SECOP II registrado"
     CERRADO = "Trámite cerrado"
@@ -108,7 +106,6 @@ ETIQUETAS_DEVOLUCION = frozenset({
 })
 
 _EVENTO_TRAMITE = {
-    TramiteFinal.Tipo.ENTREGA_CIERRE: Eventos.TF_ENTREGA,
     TramiteFinal.Tipo.CARGUE_SIIFWEB: Eventos.TF_SIIFWEB,
     TramiteFinal.Tipo.CARGUE_SECOP: Eventos.TF_SECOP,
 }
@@ -478,8 +475,8 @@ def registrar_revision(asignacion, resultado, comentario):
 def decidir_supervisor(cuenta, supervisor, resultado, comentario):
     """Cierre manual del supervisor (solo si los revisores ya aprobaron).
 
-    Aprobar habilita el cargue de documentos de cierre por el contratista. El
-    supervisor NO carga documentos.
+    Aprobar habilita el cargue de los documentos de cierre firmados por el rol de
+    radicación. El supervisor NO carga documentos.
     """
     cuenta = _lock(cuenta)
     cuenta.revisar_supervisor(resultado, comentario)
@@ -492,25 +489,28 @@ def decidir_supervisor(cuenta, supervisor, resultado, comentario):
 
 
 # --------------------------------------------------------------------------- #
-# 5. Cargue de documentos de cierre (por el contratista)
+# 5. Cargue de documentos de cierre firmados (por el rol de radicación)
 # --------------------------------------------------------------------------- #
 def documentos_cierre_faltantes(cuenta):
-    """Tipos de documento de cierre que aún no se han cargado."""
-    cargados = set(cuenta.documentocierre_set.values_list("tipo", flat=True))
-    return [t for t in DocumentoCierre.Tipo if t.value not in cargados]
+    """Tipos obligatorios de la vigencia que aún no se cargaron como documento de
+    cierre firmado. Mismos tipos obligatorios que validan la entrega inicial."""
+    cargados = set(cuenta.documentocierre_set.values_list("tipo_documento_id", flat=True))
+    return [t for t in tipos_obligatorios(cuenta) if t.id not in cargados]
 
 
 @transaction.atomic
-def cargar_documento_cierre(cuenta, tipo, archivo, usuario):
-    """Carga un documento de cierre (Informe / Certificado). Lo hace el contratista.
+def cargar_documento_cierre(cuenta, tipo_documento, archivo, usuario):
+    """Carga un documento de cierre FIRMADO (mismo tipo del catálogo que la entrega
+    inicial). Lo hace el rol de radicación tras la aprobación del supervisor.
 
     El ``clean()`` del modelo exige que el supervisor haya aprobado.
     """
-    if tipo not in DocumentoCierre.Tipo.values:
-        raise ValidationError("Tipo de documento de cierre inválido.")
+    if not es_radicacion(usuario):
+        raise ValidationError("Solo el rol de radicación puede cargar el cierre.")
     try:
         doc = DocumentoCierre(
-            cuenta_entrega=cuenta, tipo=tipo, documento=archivo, usuario=usuario
+            cuenta_entrega=cuenta, tipo_documento=tipo_documento,
+            documento=archivo, usuario=usuario,
         )
         doc.save()  # full_clean valida cuenta aprobada
     except IntegrityError:
@@ -524,7 +524,7 @@ def cargar_documento_cierre(cuenta, tipo, archivo, usuario):
 
 
 # --------------------------------------------------------------------------- #
-# 6. Trámites finales (EC → SF → SC, secuenciales por rol)
+# 6. Trámites finales (SF → SC, secuenciales por rol)
 # --------------------------------------------------------------------------- #
 def tramite_de(cuenta, tipo):
     return cuenta.tramites_finales.filter(tipo=tipo).first()
@@ -536,7 +536,10 @@ def tramite_realizado(cuenta, tipo):
 
 
 def tramite_habilitado(cuenta, tipo):
-    """True si el trámite ``tipo`` puede responderse ahora (secuencia EC→SF→SC)."""
+    """True si el trámite ``tipo`` puede responderse ahora (secuencia SF→SC).
+
+    ``SF`` se habilita cuando los documentos de cierre firmados están completos.
+    """
     if cuenta.estado_supervisor != CuentaEntrega.ResultadoRevision.APROBADA:
         return False
     if documentos_cierre_faltantes(cuenta):
@@ -552,7 +555,7 @@ def tramite_habilitado(cuenta, tipo):
 @transaction.atomic
 def responder_tramite(cuenta, tipo, usuario, realizado, evidencia, comentario):
     """Registra la respuesta a un trámite final. Al marcar realizado exige
-    evidencia (lo impone el modelo). Cierra el trámite si los tres están listos."""
+    evidencia (lo impone el modelo). Cierra el trámite si los dos están listos."""
     cuenta = _lock(cuenta)
     if tipo not in TramiteFinal.Tipo.values:
         raise ValidationError("Tipo de trámite inválido.")
@@ -597,7 +600,7 @@ def cerrar_tramite(cuenta, usuario):
     cuenta = _lock(cuenta)
     faltan_cierre = documentos_cierre_faltantes(cuenta)
     if faltan_cierre:
-        nombres = ", ".join(t.label for t in faltan_cierre)
+        nombres = ", ".join(t.nombre for t in faltan_cierre)
         raise ValidationError(f"Faltan documentos de cierre: {nombres}.")
     faltan_tramites = [t for t in SECUENCIA_TRAMITES if not tramite_realizado(cuenta, t)]
     if faltan_tramites:
@@ -648,10 +651,8 @@ def notificaciones_para(user):
             if c.estado_supervisor == CuentaEntrega.ResultadoRevision.RECHAZADA:
                 continue
             if c.estado_supervisor == AP:
-                if documentos_cierre_faltantes(c):
-                    items.append(_notif(
-                        NOTIF_APROBACION, "Carga los documentos de cierre", c))
-            elif not entrega_enviada(c):
+                continue  # tras la aprobación, el cierre lo carga radicación
+            if not entrega_enviada(c):
                 entrega = ultima_entrega(c)
                 if entrega is not None and entrega.numero_version > 1:
                     items.append(_notif(
@@ -684,9 +685,9 @@ def notificaciones_para(user):
                 items.append(_notif(
                     NOTIF_APROBACION, "Esperando aprobación de radicación", c))
         for c in base.filter(estado_supervisor=AP):
-            if tramite_habilitado(c, TramiteFinal.Tipo.ENTREGA_CIERRE):
+            if documentos_cierre_faltantes(c):
                 items.append(_notif(
-                    NOTIF_REVISION, "Registra la entrega de documentos de cierre", c))
+                    NOTIF_REVISION, "Carga los documentos de cierre firmados", c))
 
     # Revisores (incluye al administrativo para el trámite SIIFWEB)
     asignaciones = AsignacionRevisor.objects.filter(
@@ -796,24 +797,24 @@ def flujo_de_cuenta(cuenta):
     else:
         etapas.append(_etapa("supervisor", "Decisión del supervisor (para firma)", FUTURA))
 
-    # 6. Cargue de documentos de cierre
+    # 6. Cargue de documentos de cierre firmados (radicación)
     if cuenta.estado_supervisor == AP:
         if documentos_cierre_faltantes(cuenta):
-            etapas.append(_etapa("cierre_docs", "Documentos de cierre", ACTUAL, "Cargue incompleto"))
+            etapas.append(_etapa("cierre_docs", "Documentos de cierre firmados", ACTUAL, "Cargue incompleto"))
         else:
-            etapas.append(_etapa("cierre_docs", "Documentos de cierre", HECHA, "Cargados"))
+            etapas.append(_etapa("cierre_docs", "Documentos de cierre firmados", HECHA, "Cargados"))
     else:
-        etapas.append(_etapa("cierre_docs", "Documentos de cierre", FUTURA))
+        etapas.append(_etapa("cierre_docs", "Documentos de cierre firmados", FUTURA))
 
     # 7. Trámites finales
     hechos = [t for t in SECUENCIA_TRAMITES if tramite_realizado(cuenta, t)]
     if len(hechos) == len(SECUENCIA_TRAMITES):
-        etapas.append(_etapa("tramites", "Trámites finales (EC → SF → SC)", HECHA, "Completados"))
+        etapas.append(_etapa("tramites", "Trámites finales (SIIFWEB → SECOP II)", HECHA, "Completados"))
     elif cuenta.estado_supervisor == AP and not documentos_cierre_faltantes(cuenta):
         nombres = ", ".join(TramiteFinal.Tipo(t).label for t in hechos) or "ninguno"
-        etapas.append(_etapa("tramites", "Trámites finales (EC → SF → SC)", ACTUAL, f"Realizados: {nombres}"))
+        etapas.append(_etapa("tramites", "Trámites finales (SIIFWEB → SECOP II)", ACTUAL, f"Realizados: {nombres}"))
     else:
-        etapas.append(_etapa("tramites", "Trámites finales (EC → SF → SC)", FUTURA))
+        etapas.append(_etapa("tramites", "Trámites finales (SIIFWEB → SECOP II)", FUTURA))
 
     # 8. Cierre
     if cuenta.fecha_cierre is not None:
@@ -841,11 +842,10 @@ def _responsable_paso(cuenta, clave):
     if clave == "supervisor":
         return "Supervisor"
     if clave == "cierre_docs":
-        return "Contratista"
+        return "Rol de radicación"
     if clave == "tramites":
         nxt = next((t for t in SECUENCIA_TRAMITES if not tramite_realizado(cuenta, t)), None)
         return {
-            TramiteFinal.Tipo.ENTREGA_CIERRE: "Rol de radicación",
             TramiteFinal.Tipo.CARGUE_SIIFWEB: "Revisor administrativo",
             TramiteFinal.Tipo.CARGUE_SECOP: "Rol de secop",
         }.get(nxt, "—")

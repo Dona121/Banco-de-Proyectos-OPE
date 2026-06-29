@@ -4,11 +4,11 @@ from django.contrib.auth import get_user_model
 
 from .models import (
     CuentaEntrega,
-    DocumentoCierre,
     DocumentosCuentaCobro,
     RequisitoDocumental,
     RevisionCuentaCobro,
     RevisionParaRadicacion,
+    TipoDocumentoCargue,
     TramiteFinal,
 )
 from .roles import REVISOR
@@ -171,20 +171,39 @@ class DecisionSupervisorForm(EstilizadoMixin, forms.Form):
 
 
 # --------------------------------------------------------------------------- #
-# Cierre
+# Cierre (lo carga el rol de radicación: mismos tipos del catálogo, firmados)
 # --------------------------------------------------------------------------- #
 class DocumentoCierreForm(EstilizadoMixin, forms.Form):
     # Form plano (no ModelForm): el clean() de DocumentoCierre accede a
     # cuenta_entrega, que aún no existe durante la validación. El servicio
     # construye la instancia y dispara full_clean con la cuenta ya asignada.
-    tipo = forms.ChoiceField(
-        label="Tipo de documento de cierre", choices=DocumentoCierre.Tipo.choices
+    tipo_documento = forms.ModelChoiceField(
+        label="Tipo de documento de cierre",
+        queryset=TipoDocumentoCargue.objects.all(),
     )
-    documento = forms.FileField(label="Documento")
+    documento = forms.FileField(label="Documento firmado")
+
+    def __init__(self, *args, cuenta=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if cuenta is not None:
+            # Solo los tipos obligatorios de la vigencia que aún no se han
+            # cargado como documento de cierre.
+            tipos = set(
+                RequisitoDocumental.objects.filter(
+                    vigencia=cuenta.vigencia, obligatorio=True
+                ).values_list("tipo_documento_id", flat=True)
+            )
+            cargados = set(
+                cuenta.documentocierre_set.values_list("tipo_documento_id", flat=True)
+            )
+            tipos -= cargados
+            self.fields["tipo_documento"].queryset = (
+                TipoDocumentoCargue.objects.filter(id__in=tipos).order_by("nombre")
+            )
 
 
 # --------------------------------------------------------------------------- #
-# Trámites finales (EC / SF / SC)
+# Trámites finales (SF / SC)
 # --------------------------------------------------------------------------- #
 class TramiteFinalForm(EstilizadoMixin, forms.Form):
     # Responder un trámite es marcar "sí" (realizado): exige evidencia y

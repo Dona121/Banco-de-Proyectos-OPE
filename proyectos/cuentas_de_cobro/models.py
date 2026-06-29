@@ -3,6 +3,7 @@ from contenido.models import Fechas
 from django.db import models
 from django.utils import timezone
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 
 # Create your models here.
 
@@ -33,7 +34,8 @@ class TipoDocumentoCargue(Fechas):
 class RequisitoDocumental(Fechas):
     """Configura qué tipos de documento se requieren por vigencia y si son
     obligatorios. La validación de completitud compara los tipos obligatorios de
-    la vigencia contra los cargados en la última entrega."""
+    la vigencia contra los cargados en la última entrega; y también contra los
+    documentos de cierre firmados."""
     vigencia = models.ForeignKey(
         Vigencia, on_delete=models.CASCADE, verbose_name="Vigencia",
     )
@@ -103,7 +105,10 @@ class CuentaEntrega(Fechas):
         verbose_name="Fecha de radicación de la entrega", null=True, blank=True,
     )
     fecha_aprobacion_revisores = models.DateTimeField(
-        verbose_name="Fecha de aprobación", null=True, blank=True,
+        verbose_name="Fecha de aprobación revisores", null=True, blank=True,
+    )
+    fecha_aprobacion_supervisor = models.DateTimeField(
+        verbose_name="Fecha de aprobación supervisor", null=True, blank=True,
     )
     fecha_cierre = models.DateTimeField(
         verbose_name="Fecha de cierre del trámite", null=True, blank=True,
@@ -156,8 +161,6 @@ class CuentaEntrega(Fechas):
             self.save(update_fields=["estado_revisores", "fecha_aprobacion_revisores"])
 
     def revisar_supervisor(self, resultado, comentario=""):
-        """Cierre manual del supervisor. Solo habilitado si los revisores ya
-        aprobaron. El supervisor elige aprobar o rechazar."""
         if self.estado_revisores != self.ResultadoRevision.APROBADA:
             raise ValidationError(
                 "No se puede habilitar la decisión del supervisor: los "
@@ -166,10 +169,14 @@ class CuentaEntrega(Fechas):
         if resultado not in self.ResultadoRevision.values:
             raise ValidationError("Resultado inválido para la decisión del supervisor.")
         self.estado_supervisor = resultado
+        if resultado == self.ResultadoRevision.APROBADA:
+            self.fecha_aprobacion_supervisor = timezone.now()
         if comentario:
             self.comentario = comentario
         self.full_clean()
-        self.save(update_fields=["estado_supervisor", "comentario"])
+        self.save(update_fields=[
+            "estado_supervisor", "fecha_aprobacion_supervisor", "comentario",
+        ])
 
     def cerrar(self):
         """Cierra el trámite. Solo procede si el supervisor aprobó. La presencia
@@ -434,6 +441,18 @@ class RevisionCuentaCobro(Fechas):
         # No se pueden crear revisiones sobre una cuenta ya aprobada.
         if self.documento_entrega.cuenta_entrega.estado_supervisor == CuentaEntrega.ResultadoRevision.APROBADA:
             raise ValidationError("No se pueden crear revisiones sobre una cuenta aprobada")
+        # Para APROBAR, todos los documentos deben estar aprobados o no aplica
+        # (ninguno rechazado ni pendiente).
+        if self.resultado == self.ResultadoRevision.APROBADA:
+            hay_pendientes_o_rechazados = self.documento_entrega.documentoscuentacobro_set.filter(
+                Q(estado=DocumentosCuentaCobro.EstadoDocumento.RECHAZADO)
+                | Q(estado=DocumentosCuentaCobro.EstadoDocumento.PENDIENTE)
+            ).exists()
+            if hay_pendientes_o_rechazados:
+                raise ValidationError(
+                    "No se puede aprobar la revisión: todos los documentos deben estar "
+                    "aprobados o marcados como no aplica (hay documentos rechazados o pendientes)."
+                )
 
     def save(self, *args, **kwargs):
         self.full_clean()
@@ -441,30 +460,30 @@ class RevisionCuentaCobro(Fechas):
 
 
 class DocumentoCierre(Fechas):
-    """Documentos finales (Informe de Supervisión, Certificado de Cumplimiento)
-    cargados por el CONTRATISTA tras la aprobación final del supervisor (la que
-    autoriza la firma de los documentos de cierre).
+    """Documentos de cierre: los MISMOS tipos que el contratista cargó
+    inicialmente para revisión, pero ahora FIRMADOS. Los carga el rol de
+    RADICACIÓN tras la aprobación final del supervisor (la que autoriza la firma).
 
-    Desacoplado de DocumentoEntrega: no se versiona ni pasa por los tres
-    revisores. Su guarda en clean() es la INVERSA de DocumentoEntrega: aquí se
-    EXIGE que el supervisor haya aprobado, mientras que allá se PROHÍBE.
+    Los documentos iniciales pueden no estar firmados; los de cierre sí. Se
+    apoyan en el mismo catálogo (TipoDocumentoCargue) y los mismos requisitos
+    obligatorios (RequisitoDocumental) que la entrega inicial. Desacoplado de
+    DocumentoEntrega: no se versiona ni pasa por los tres revisores. Su guarda en
+    clean() es la INVERSA de DocumentoEntrega: aquí se EXIGE que el supervisor
+    haya aprobado, mientras que allá se PROHÍBE.
     """
-
-    class Tipo(models.TextChoices):
-        INFORME_SUPERVISION = "IS", "Informe de Supervisión"
-        CERTIFICADO_CUMPLIMIENTO = "CC", "Certificado de Cumplimiento"
 
     cuenta_entrega = models.ForeignKey(
         CuentaEntrega, on_delete=models.CASCADE, verbose_name="Cuenta de entrega",
     )
-    tipo = models.CharField(
-        max_length=2, choices=Tipo.choices, verbose_name="Tipo de documento de cierre",
+    tipo_documento = models.ForeignKey(
+        TipoDocumentoCargue, on_delete=models.CASCADE, verbose_name="Tipo de documento",
     )
     documento = models.FileField(
-        upload_to="cierres/%Y/%m/", verbose_name="Documento",
+        upload_to="cierres/%Y/%m/", verbose_name="Documento firmado",
     )
     usuario = models.ForeignKey(
-        User, on_delete=models.PROTECT, verbose_name="Contratista que carga el cierre",
+        User, on_delete=models.PROTECT,
+        verbose_name="Rol de radicación que carga el cierre firmado",
     )
 
     class Meta:
@@ -472,12 +491,13 @@ class DocumentoCierre(Fechas):
         verbose_name_plural = "Documentos de cierre"
         constraints = [
             models.UniqueConstraint(
-                fields=["cuenta_entrega", "tipo"], name="documento_cierre_unico_por_tipo",
+                fields=["cuenta_entrega", "tipo_documento"],
+                name="documento_cierre_unico_por_tipo",
             )
         ]
 
     def __str__(self):
-        return f"{self.get_tipo_display()} - {self.cuenta_entrega}"
+        return f"{self.tipo_documento.nombre} (firmado) - {self.cuenta_entrega}"
 
     def clean(self):
         super().clean()
@@ -525,22 +545,22 @@ class EventoTrazabilidad(Fechas):
 
 
 class TramiteFinal(Fechas):
-    """Trámites posteriores al cargue de documentos de cierre por el contratista.
+    """Trámites posteriores al cargue de documentos de cierre firmados.
 
-    Tres pasos secuenciales, cada uno respondido por un rol específico:
-      - ENTREGA_CIERRE: ¿Los documentos en físico se firmaron y fueron entregados
-        al contratista? → la responde el rol de RADICACIÓN.
+    Dos pasos secuenciales, cada uno respondido por un rol específico:
       - CARGUE_SIIFWEB: ¿Se cargó a SIIFWEB? → la responde el REVISOR ADMINISTRATIVO.
       - CARGUE_SECOP: ¿Se cargó a SECOP II? → la responde el rol de SECOP.
 
-    Restricción de modelo (solicitada): NO se puede adjuntar evidencia si el
-    trámite no está marcado como realizado. Se refuerza en clean() y con un
-    CheckConstraint a nivel de base de datos. La validación de qué rol puede
-    responder cada tipo se hace en la capa de servicios/permisos.
+    (El antiguo paso de "entrega de documentos de cierre" se eliminó: ahora la
+    carga de los documentos firmados por el rol de radicación cumple esa función.)
+
+    Restricción de modelo: NO se puede adjuntar evidencia si el trámite no está
+    marcado como realizado. Se refuerza en clean() y con un CheckConstraint a
+    nivel de base de datos. La validación de qué rol puede responder cada tipo se
+    hace en la capa de servicios/permisos.
     """
 
     class Tipo(models.TextChoices):
-        ENTREGA_CIERRE = "EC", "Entrega de documentos de cierre"
         CARGUE_SIIFWEB = "SF", "Cargue en SIIFWEB"
         CARGUE_SECOP = "SC", "Cargue en SECOP II"
 
@@ -570,7 +590,7 @@ class TramiteFinal(Fechas):
             ),
             # No se puede adjuntar evidencia si no se marcó "realizado".
             models.CheckConstraint(
-                check=models.Q(realizado=True) | models.Q(evidencia=""),
+                condition=models.Q(realizado=True) | models.Q(evidencia=""),
                 name="evidencia_requiere_realizado",
             ),
         ]

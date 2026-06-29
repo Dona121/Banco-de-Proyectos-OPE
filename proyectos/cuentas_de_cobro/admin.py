@@ -90,8 +90,8 @@ class RevisionParaRadicacionInline(TabularInline):
 class DocumentoCierreInline(TabularInline):
     model = DocumentoCierre
     extra = 0
-    fields = ("tipo", "documento", "usuario")
-    autocomplete_fields = ("usuario",)
+    fields = ("tipo_documento", "documento", "usuario")
+    autocomplete_fields = ("tipo_documento", "usuario")
 
 
 class TramiteFinalInline(TabularInline):

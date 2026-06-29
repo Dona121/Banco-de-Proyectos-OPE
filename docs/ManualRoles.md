@@ -112,14 +112,14 @@ esa actividad le aparece un aviso de plazo.
 El flujo va así: el **Contratista** arma su cuenta del mes y la entrega; alguien
 de **Radicación o el Supervisor** hace la primera revisión; el **Supervisor**
 nombra a tres **Revisores** (jurídico, administrativo y técnico) que revisan en
-orden; el **Supervisor** da la decisión final; el **Contratista** sube los
-documentos de cierre; y por último se hacen tres **pasos finales** (Radicación,
-Revisor administrativo y Secop) que cierran la cuenta.
+orden; el **Supervisor** da la decisión final; **Radicación** sube los documentos
+de cierre (los mismos de la cuenta, ahora firmados); y por último se hacen dos
+**pasos finales** (Revisor administrativo y Secop) que cierran la cuenta.
 
 ```
 Contratista → (1ª revisión) Radicación/Supervisor → Supervisor nombra revisores
 → Revisores: jurídico → administrativo → técnico → Supervisor (decisión final)
-→ Contratista (documentos de cierre) → Radicación → Rev. administrativo → Secop → Cierre
+→ Radicación (documentos de cierre firmados) → Rev. administrativo → Secop → Cierre
 ```
 
 > **Regla clave:** si en cualquier revisión piden correcciones o no aprueban, la
@@ -135,7 +135,6 @@ Contratista → (1ª revisión) Radicación/Supervisor → Supervisor nombra rev
 - Crear su cuenta de cobro del mes.
 - Subir los documentos que se le piden.
 - Entregar la cuenta para que la revisen.
-- Más adelante, subir los documentos de cierre.
 - Ver únicamente **sus propias** cuentas.
 
 **En qué procesos participa y qué hace:**
@@ -144,37 +143,36 @@ Contratista → (1ª revisión) Radicación/Supervisor → Supervisor nombra rev
 3. **Entregar.** Cuando están todos, presiona **Entregar** para mandarlos a revisión.
 4. **Corregir** (si le devuelven la cuenta): sube de nuevo todos los documentos y
    vuelve a entregar.
-5. **Subir los documentos de cierre** (informe de supervisión y certificado de
-   cumplimiento) cuando el supervisor aprueba.
 
 **Qué se activa cuando actúa:**
 - Al **entregar**, la cuenta queda lista para la primera revisión y la pueden ver
   Radicación y el Supervisor.
-- Al **subir los documentos de cierre completos**, se habilitan los pasos finales.
 
 ## Radicación
 
-**Quién es:** el área que hace la primera revisión de los documentos y, al final,
-confirma la entrega de los documentos firmados.
+**Quién es:** el área que hace la primera revisión de los documentos y, tras la
+aprobación del supervisor, carga los documentos de cierre ya firmados.
 
 **Qué puede hacer (permisos):**
 - Hacer la **primera revisión** de la cuenta (igual que el supervisor).
 - Marcar el estado de los documentos durante esa primera revisión.
-- Responder el **primer paso final** (entrega de documentos al contratista).
+- **Cargar los documentos de cierre firmados** (los mismos documentos de la cuenta,
+  ahora con firma).
 
 **En qué procesos participa y qué hace:**
 1. **Primera revisión.** Revisa los documentos que entregó el contratista y decide:
    - **Aprobado** → la cuenta sigue adelante.
    - **Requiere ajustes** → vuelve al contratista para corregir.
    - **Rechazado** → deja anotado que algún documento no corresponde.
-2. **Primer paso final.** Al terminar todo, confirma que los documentos firmados
-   se le entregaron al contratista.
+2. **Documentos de cierre firmados.** Después de que el supervisor aprueba, sube los
+   mismos documentos de la cuenta, ahora firmados, hasta completar los obligatorios.
 
 **Qué se activa cuando actúa:**
 - Al **aprobar** la primera revisión, la cuenta queda lista para que el supervisor
   nombre a los revisores.
 - Al **pedir ajustes**, la cuenta vuelve al contratista y el trámite reinicia.
-- Al **confirmar el primer paso final**, se habilita el siguiente paso final.
+- Al **completar los documentos de cierre firmados**, se habilitan los pasos finales
+  (empezando por el cargue en SIIFWEB).
 
 ## Supervisor
 
@@ -197,8 +195,8 @@ final.
 
 **Qué se activa cuando actúa:**
 - Al **nombrar a los revisores**, empieza la revisión en orden (primero el jurídico).
-- Al **aprobar** la decisión final, le toca al contratista subir los documentos
-  de cierre.
+- Al **aprobar** la decisión final, queda registrada la fecha de aprobación y le
+  toca a **Radicación** cargar los documentos de cierre firmados.
 - Al **rechazar**, la cuenta se cierra sin continuar.
 
 ## Revisores (jurídico, administrativo y técnico)
@@ -218,7 +216,9 @@ nombrarlas.
    - **2.º** la **administrativa**,
    - **3.º** la **técnica**.
    En su turno deciden: **Aprobado** (pasa al siguiente) o **piden ajustes / no
-   aprueban** (la cuenta se devuelve).
+   aprueban** (la cuenta se devuelve). Para poder **aprobar**, antes deben dejar
+   cada documento marcado como *Aprobado* o *No aplica*: no se puede aprobar la
+   revisión mientras quede algún documento pendiente o rechazado.
 2. **Declinar** (si no pueden): el supervisor pondrá a otra persona en ese rol.
 
 **Qué se activa cuando actúan:**
@@ -242,19 +242,18 @@ proceso.
 1. **Último paso final.** Confirma que la cuenta se publicó en el portal SECOP II.
 
 **Qué se activa cuando actúa:**
-- Al confirmar este paso, se completan los tres pasos finales y **la cuenta se
+- Al confirmar este paso, se completan los dos pasos finales y **la cuenta se
   cierra sola**.
 
-## Los tres pasos finales (en orden)
+## Los dos pasos finales (en orden)
 
-Después de que el contratista sube los documentos de cierre, se hacen tres pasos,
-**uno después de otro**, y cada uno con su soporte:
+Después de que **Radicación** sube los documentos de cierre firmados, se hacen dos
+pasos, **uno después de otro**, y cada uno con su soporte:
 
-1. **Radicación** — confirma que los documentos firmados se entregaron al contratista.
-2. **Revisor administrativo** — confirma que la cuenta se subió al sistema SIIFWEB.
-3. **Secop** — confirma que la cuenta se publicó en el portal SECOP II.
+1. **Revisor administrativo** — confirma que la cuenta se subió al sistema SIIFWEB.
+2. **Secop** — confirma que la cuenta se publicó en el portal SECOP II.
 
-Cuando se cumplen los tres, **el sistema cierra la cuenta automáticamente**. Fin
+Cuando se cumplen los dos, **el sistema cierra la cuenta automáticamente**. Fin
 del proceso.
 
 ## Avisos automáticos en Cuentas de cobro
@@ -273,8 +272,8 @@ tener que estar buscando.
 | Proyectos | **Director** | Crea proyectos y los asigna a un coordinador. |
 | Proyectos | **Coordinador** | Organiza el proyecto en actividades y revisa las entregas. |
 | Proyectos | **Formulador** | Realiza las actividades y las entrega. |
-| Cuentas de cobro | **Contratista** | Arma su cuenta del mes, la entrega y sube el cierre. |
-| Cuentas de cobro | **Radicación** | Hace la primera revisión y confirma la entrega final de documentos. |
+| Cuentas de cobro | **Contratista** | Arma su cuenta del mes y la entrega. |
+| Cuentas de cobro | **Radicación** | Hace la primera revisión y carga los documentos de cierre firmados. |
 | Cuentas de cobro | **Supervisor** | Nombra revisores y da la decisión final. |
 | Cuentas de cobro | **Revisores** | Revisan en orden: jurídico, administrativo y técnico. |
 | Cuentas de cobro | **Secop** | Publica la cuenta en SECOP II y se cierra el proceso. |

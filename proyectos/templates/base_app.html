@@ -96,7 +96,7 @@
           </span>
           <span class="hidden sm:block min-w-0 max-w-[11rem] text-left leading-tight">
             <span class="block truncate text-sm font-semibold text-slate-700">{{ user.get_full_name|default:user.username }}</span>
-            <span class="block truncate text-[11px] text-slate-400">{{ rol_principal }}</span>
+            <span class="block truncate text-[11px] text-slate-400">{{ cc_rol_principal|default:rol_principal }}</span>
           </span>
           <svg class="hidden sm:block h-4 w-4 shrink-0 text-slate-400" :class="open && 'rotate-180'" style="transition:transform .15s" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg>
         </button>
@@ -106,7 +106,7 @@
              class="absolute right-4 top-14 w-52 rounded-xl border border-slate-200 bg-white py-1.5 shadow-lg">
           <div class="px-4 py-2 border-b border-slate-100">
             <p class="text-sm font-semibold text-slate-700 truncate">{{ user.get_full_name|default:user.username }}</p>
-            <p class="text-xs text-slate-400 truncate">{{ user.email|default:rol_principal }}</p>
+            <p class="text-xs text-slate-400 truncate">{{ user.email|default:cc_rol_principal|default:rol_principal }}</p>
           </div>
           <a href="{% url 'cuentas:perfil' %}" class="flex items-center gap-2.5 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">
             <svg class="h-4 w-4 text-slate-400" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.5 20.118a7.5 7.5 0 0 1 15 0A17.9 17.9 0 0 1 12 21.75c-2.676 0-5.216-.584-7.5-1.632Z"/></svg>

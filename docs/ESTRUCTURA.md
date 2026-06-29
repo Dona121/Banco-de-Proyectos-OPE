@@ -171,14 +171,14 @@ Módulo **aparte** (no toca las otras apps). Especificación autoritativa: `Modu
 
 | Archivo | Responsabilidad |
 |---|---|
-| `models.py` | `Vigencia`, `TipoDocumentoCargue`, `RequisitoDocumental`, `CuentaEntrega`, `DocumentoEntrega` (paquete versionado), `DocumentosCuentaCobro`, `RevisionParaRadicacion`, `AsignacionRevisor`, `RevisionCuentaCobro`, `DocumentoCierre`, `TramiteFinal` (EC/SF/SC), `EventoTrazabilidad`. **No modificar.** |
+| `models.py` | `Vigencia`, `TipoDocumentoCargue`, `RequisitoDocumental`, `CuentaEntrega`, `DocumentoEntrega` (paquete versionado), `DocumentosCuentaCobro`, `RevisionParaRadicacion`, `AsignacionRevisor`, `RevisionCuentaCobro`, `DocumentoCierre` (mismos tipos del catálogo, firmados, `tipo_documento` FK), `TramiteFinal` (SF/SC), `EventoTrazabilidad`. **No modificar.** |
 | `services.py` | Transiciones y **gating secuencial** (`transaction.atomic` + `select_for_update`); catálogo de eventos `Eventos`; `entregar`, `registrar_revision_radicacion`, `asignar_revisor`, `registrar_revision`, `decidir_supervisor`, `cargar_documento_cierre`, `responder_tramite`; `notificaciones_para(user)`; `flujo_de_cuenta(cuenta)` y `paso_actual(cuenta)` (etapa actual, responsable, paso siguiente). |
 | `selectors.py` | Querysets por rol/**intervención** y permisos a nivel de objeto (`puede_entregar`, `puede_radicar`, `puede_marcar_documentos`, `puede_cargar_cierre`, `puede_responder_tramite`, …). |
 | `roles.py` / `mixins.py` | Roles propios por Django Groups: **Contratista, Supervisor, Revisor, Radicacion, Secop**. El rol jurídico/administrativo/técnico lo lleva la `AsignacionRevisor`, no un grupo. |
 | `context_processors.py` | `roles_cuentas_cobro`: roles + `cc_notificaciones` para el topbar. |
 | `admin.py` · `views.py` · `urls.py` · `templatetags/cuentas_cobro_extras.py` | Admin Unfold; CBVs delgadas; namespace `cuentas_cobro:`; tag `cc_badge`. |
 
-**Flujo:** contratista crea la cuenta y carga documentos → **Entregar** (valida completitud) → radicación (Supervisor o Radicación) → asignación de 3 revisores → revisión secuencial **jurídico → administrativo → técnico** (gating) → decisión final del supervisor (para firma) → el contratista carga los documentos de cierre → trámites finales **EC → SF → SC** (Radicación / Revisor administrativo / Secop) → cierre automático. **Reinicio TOTAL** ante cualquier devolución: nueva versión vacía y re-revisión desde el jurídico.
+**Flujo:** contratista crea la cuenta y carga documentos → **Entregar** (valida completitud) → radicación (Supervisor o Radicación) → asignación de 3 revisores → revisión secuencial **jurídico → administrativo → técnico** (gating; para aprobar, todos los documentos en AP/NA) → decisión final del supervisor (para firma; setea `fecha_aprobacion_supervisor`) → **Radicación** carga los documentos de cierre **firmados** (mismos tipos del catálogo) → trámites finales **SF → SC** (Revisor administrativo / Secop) → cierre automático. **Reinicio TOTAL** ante cualquier devolución: nueva versión vacía y re-revisión desde el jurídico.
 
 **Migraciones de grupos:** `0003_roles_cuentas_cobro` (Contratista/Supervisor/Revisor) y `0005_roles_radicacion_secop` (Radicacion/Secop).
 

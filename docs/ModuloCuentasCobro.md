@@ -73,16 +73,17 @@ exactamente.
   por `(documento_entrega, rol)`. `clean()` valida que `rol` coincida con
   `asignacion.rol`, que la asignación esté `AC`, y que la cuenta no esté aprobada.
   Es **el veredicto de un rol sobre una entrega**.
-- **`DocumentoCierre`** — `cuenta_entrega`, `tipo` (`IS` Informe de Supervisión /
-  `CC` Certificado de Cumplimiento), `documento` (FileField), `usuario`. Único por
-  `(cuenta_entrega, tipo)`. `clean()` **exige** `estado_supervisor == AP` (guarda
-  inversa a `DocumentoEntrega`). Lo carga el **contratista**, no se versiona.
+- **`DocumentoCierre`** — `cuenta_entrega`, `tipo_documento` (**FK a
+  `TipoDocumentoCargue`**: los mismos tipos del catálogo de la entrega, ahora
+  **firmados**), `documento` (FileField), `usuario`. Único por
+  `(cuenta_entrega, tipo_documento)`. `clean()` **exige** `estado_supervisor == AP`
+  (guarda inversa a `DocumentoEntrega`). Lo carga el **rol de radicación**, no se
+  versiona.
 - **`TramiteFinal`** — `cuenta_entrega` (related_name `tramites_finales`), `tipo`
-  (`EC` Entrega de documentos de cierre / `SF` Cargue en SIIFWEB / `SC` Cargue en
-  SECOP II), `usuario`, `realizado` (bool), `evidencia` (FileField, opcional),
-  `comentario`. Único por `(cuenta_entrega, tipo)`. `clean()` + `CheckConstraint`
-  **impiden evidencia sin `realizado=True`**, y `clean()` exige evidencia al marcar
-  realizado. Los tres pasos finales del flujo.
+  (`SF` Cargue en SIIFWEB / `SC` Cargue en SECOP II), `usuario`, `realizado` (bool),
+  `evidencia` (FileField, opcional), `comentario`. Único por `(cuenta_entrega, tipo)`.
+  `clean()` + `CheckConstraint` **impiden evidencia sin `realizado=True`**, y
+  `clean()` exige evidencia al marcar realizado. Los dos pasos finales del flujo.
 - **`EventoTrazabilidad`** — `cuenta_entrega` (related_name `eventos`), `actor`,
   `etapa` (`RAD`/`ASI`/`REV`/`SUP`/`CIE`), `evento` (str corto), `detalle`.
   Bitácora. **Lo escribes desde servicios en cada transición.**
@@ -103,18 +104,18 @@ implementar.**
 ## Actores y roles
 
 - **Contratista** (`CuentaEntrega.usuario`): crea la cuenta, carga documentos,
-  pulsa "Entregar", recarga el paquete completo tras devoluciones, y **carga los
-  documentos de cierre** (Informe de Supervisión, Certificado de Cumplimiento).
-- **Rol de radicación:** aprueba la radicación (igual que el supervisor) y responde
-  el trámite final 8.1 ("¿Los documentos en físico se firmaron y fueron entregados
-  al contratista?").
+  pulsa "Entregar" y recarga el paquete completo tras devoluciones. **No** carga los
+  documentos de cierre.
+- **Rol de radicación:** aprueba la radicación (igual que el supervisor) y, tras la
+  aprobación del supervisor, **carga los documentos de cierre firmados** (los mismos
+  tipos del catálogo que la entrega, ahora firmados).
 - **Supervisor:** aprueba la radicación, asigna y reasigna revisores, y emite la
-  decisión final (aprobación **para firma de los documentos de cierre**, o rechazo).
-  **NO carga documentos** (ni de cierre ni posteriores).
+  decisión final (aprobación **para firma de los documentos de cierre**, o rechazo;
+  al aprobar setea `fecha_aprobacion_supervisor`). **NO carga documentos**.
 - **Revisores** (jurídico, administrativo, técnico): cada uno revisa en su rol y
   marca documentos; puede declinar. El **revisor administrativo** además responde el
-  trámite final 8.2 ("¿Se cargó a SIIFWEB?").
-- **Rol de secop:** responde el trámite final 8.3 ("¿Se cargó a SECOP II?").
+  trámite final 8.1 ("¿Se cargó a SIIFWEB?").
+- **Rol de secop:** responde el trámite final 8.2 ("¿Se cargó a SECOP II?").
 - **Sistema**: valida completitud, registra radicación, crea versiones
   automáticamente, escribe trazabilidad y cierra el trámite.
 
@@ -179,6 +180,10 @@ Cada acción restringida a su actor.
 - Cada revisor emite `RevisionCuentaCobro` (apuntando a su `AsignacionRevisor`
   activa, sobre la **última** `DocumentoEntrega`):
   - **`AP`** → habilita el siguiente rol. Registra `EventoTrazabilidad(etapa=REV)`.
+    **Para aprobar, ningún documento de la entrega puede estar `PENDIENTE` ni
+    `RECHAZADO`** (todos en `AP`/`NA`): lo impone `RevisionCuentaCobro.clean()`, así
+    que la UI debe guiar al revisor a resolver el estado de cada documento (AP/NA/RE)
+    antes de habilitar "Aprobar".
   - **`AJ` / `RE`** → devuelve al contratista. El revisor marca **por documento**
     cuáles se observan: pone `DocumentosCuentaCobro.estado = RE` (o `NA`) con su
     `comentario`/causal en los que no cumplen, y deja en `AP` los que sí.
@@ -217,50 +222,49 @@ forma **automática** cuando corresponde:
 2. El supervisor llama a `cuenta.revisar_supervisor(resultado, comentario)`. En la
    UI debe quedar explícito que esta aprobación es **para la firma de los documentos
    de cierre** (no es un cargue de documentos: el supervisor NO carga nada).
-   - **`AP`** → `estado_supervisor=AP`. Habilita el cargue de documentos de cierre
-     por el contratista (§5).
-   - **`RE`** → `estado_supervisor=RE`. La cuenta queda rechazada; NO reabre el
-     flujo automáticamente.
+   - **`AP`** → `estado_supervisor=AP` y se setea **`fecha_aprobacion_supervisor`**.
+     Habilita el cargue de los documentos de cierre firmados por **radicación** (§5).
+   - **`RE`** → `estado_supervisor=RE` (y `fecha_aprobacion_supervisor` queda en
+     `None`). La cuenta queda rechazada; NO reabre el flujo automáticamente.
 3. **El comentario es obligatorio en el rechazo**: el modelo NO lo exige, así que
    **imponlo en el formulario y/o servicio**. Registra `EventoTrazabilidad(etapa=SUP)`.
 
-### 5. Cargue de documentos de cierre (por el contratista)
-1. Con `estado_supervisor == AP`, **el contratista** carga los `DocumentoCierre`
-   (`IS` Informe de Supervisión, `CC` Certificado de Cumplimiento) — el `usuario`
-   del `DocumentoCierre` es el contratista. El `clean()` del modelo exige que la
-   cuenta esté aprobada por el supervisor; respétalo.
-2. El **servicio** valida que estén presentes **todos los tipos parametrizados** de
-   `DocumentoCierre.Tipo` (la regla es: lo parametrizado es requerido). Hoy son `IS`
-   y `CC`, ambos obligatorios; recórrelo sobre `DocumentoCierre.Tipo.values`, no lo
-   hardcodees a dos. Registra `EventoTrazabilidad(etapa=CIE)` "Documentos de cierre
-   cargados".
+### 5. Cargue de documentos de cierre firmados (por el rol de radicación)
+1. Con `estado_supervisor == AP`, **el rol de radicación** carga los
+   `DocumentoCierre` — el `tipo_documento` es FK a `TipoDocumentoCargue` (los mismos
+   tipos del catálogo que la entrega, ahora **firmados**); el `usuario` del
+   `DocumentoCierre` es el usuario de radicación. El `clean()` del modelo exige que
+   la cuenta esté aprobada por el supervisor; respétalo. El servicio valida que el
+   usuario tenga rol de radicación.
+2. El **servicio** valida la completitud contra **los tipos obligatorios de la
+   vigencia** (`RequisitoDocumental` con `obligatorio=True`): cada tipo obligatorio
+   debe existir como `DocumentoCierre` de la cuenta (reutiliza el mismo helper de
+   completitud que la entrega inicial, comparando contra `DocumentoCierre`). Registra
+   `EventoTrazabilidad(etapa=CIE)` "Documentos de cierre firmados cargados".
 3. Nota: con `estado_supervisor=AP`, los `clean()` de `DocumentoEntrega` y
    `RevisionCuentaCobro` bloquean nuevas entregas/revisiones del flujo de revisión.
    Es intencional. No lo evadas.
 
 ### 6. Trámites finales (secuenciales, modelo `TramiteFinal`)
-Tras cargar los documentos de cierre, siguen **tres pasos secuenciales**, cada uno
-una instancia de `TramiteFinal` con su `tipo`. Cada paso plantea una pregunta sí/no;
+Tras cargar los documentos de cierre firmados, siguen **dos pasos secuenciales**, cada
+uno una instancia de `TramiteFinal` con su `tipo`. Cada paso plantea una pregunta sí/no;
 al marcar "sí" (`realizado=True`) se **exige adjuntar evidencia + comentario**. El
 modelo ya impone que NO haya evidencia sin `realizado=True` (clean + CheckConstraint);
 NO evadas esa guarda. La autorización por rol se valida en servicios.
 
-1. **`EC` — Entrega de documentos de cierre.** Pregunta: "¿Los documentos en físico
-   se firmaron y fueron entregados al contratista?". La responde **solo el rol de
-   radicación**. Al marcar sí → evidencia (lo enviado al contratista) + comentario.
-2. **`SF` — Cargue en SIIFWEB.** Solo se habilita tras `EC` realizado. Pregunta:
-   "¿Se cargó a SIIFWEB?". La responde **solo el revisor administrativo**. Al marcar
-   sí → evidencia + comentario.
-3. **`SC` — Cargue en SECOP II.** Solo se habilita tras `SF` realizado. Pregunta:
+1. **`SF` — Cargue en SIIFWEB.** Se habilita cuando los documentos de cierre firmados
+   están **completos** (§5). Pregunta: "¿Se cargó a SIIFWEB?". La responde **solo el
+   revisor administrativo**. Al marcar sí → evidencia + comentario.
+2. **`SC` — Cargue en SECOP II.** Solo se habilita tras `SF` realizado. Pregunta:
    "¿Se cargó a SECOP II?". La responde **solo el rol de secop**. Al marcar sí →
    evidencia + comentario.
 
-La secuencialidad (`SF` tras `EC`, `SC` tras `SF`) es **lógica de servicio** (el
-modelo solo garantiza unicidad por `(cuenta_entrega, tipo)`). Registra un
+La secuencialidad (`SC` tras `SF`) es **lógica de servicio** (el modelo solo
+garantiza unicidad por `(cuenta_entrega, tipo)`). Registra un
 `EventoTrazabilidad(etapa=CIE)` por cada trámite marcado realizado.
 
 ### 7. Cierre del trámite
-1. Cuando los tres `TramiteFinal` (`EC`, `SF`, `SC`) están `realizado=True`, el
+1. Cuando los dos `TramiteFinal` (`SF`, `SC`) están `realizado=True`, el
    **servicio** valida esa completitud y llama a `cuenta.cerrar()` → setea
    `fecha_cierre`. Registra `EventoTrazabilidad(etapa=CIE)` "Trámite cerrado".
 
@@ -290,9 +294,8 @@ filtrar; pon el comentario/motivo en `detalle`):
   comentario), "Revisores aprobaron la cuenta".
 - Etapa `SUP`: "Aprobado por supervisor (para firma de documentos de cierre)",
   **"Rechazado por supervisor"** (detalle = razón de devolución).
-- Etapa `CIE`: "Documentos de cierre cargados", "Entrega de documentos de cierre
-  registrada", "Cargue en SIIFWEB registrado", "Cargue en SECOP II registrado",
-  "Trámite cerrado".
+- Etapa `CIE`: "Documentos de cierre firmados cargados", "Cargue en SIIFWEB
+  registrado", "Cargue en SECOP II registrado", "Trámite cerrado".
 
 **Devoluciones:** son el subconjunto de eventos marcados en negrita arriba (las
 `RevisionParaRadicacion`/`RevisionCuentaCobro` con `resultado` en `AJ`/`RE`, las
@@ -320,7 +323,8 @@ intervenido. El acceso se restringe así:
   (asignó revisores). Es decir, su pertenencia se deriva de su intervención real,
   no de un campo de supervisión en `CuentaEntrega` (que no existe).
 - **Rol de radicación:** las cuentas donde aprobó radicación (`RevisionParaRadicacion`
-  con su usuario) o donde registró el `TramiteFinal` `EC`.
+  con su usuario), donde cargó algún `DocumentoCierre`, o (con `estado_supervisor=AP`)
+  las que tiene pendientes de cargar el cierre firmado.
 - **Rol de secop:** las cuentas donde registró el `TramiteFinal` `SC`.
 Quien no participa en la cuenta no ve su línea de tiempo.
 
@@ -335,17 +339,18 @@ flujo; NO se persiste ningún modelo `Notificacion` ni se toca el modelo. No hay
 **Qué mostrar por rol** (cada ítem enlaza a la cuenta/acción correspondiente):
 - **Contratista:** cuentas con devolución pendiente de corregir (documentos en `RE`
   / `RevisionParaRadicacion` o `RevisionCuentaCobro` en `AJ`/`RE` sobre su última
-  entrega); habilitación para cargar documentos de cierre (`estado_supervisor=AP` y
-  cierre incompleto).
+  entrega). Tras la aprobación del supervisor ya no tiene pendientes: el cierre lo
+  carga radicación.
 - **Supervisor / rol de radicación:** cuentas entregadas esperando aprobación de
   radicación; (supervisor) cuentas con `estado_revisores=AP` esperando su decisión
-  final; cuentas radicadas sin revisores asignados.
+  final; cuentas radicadas sin revisores asignados; (radicación) cuentas con
+  `estado_supervisor=AP` pendientes de cargar el cierre firmado.
 - **Revisor (JU/AD/TE):** cuentas donde tiene una `AsignacionRevisor` activa **y su
   turno está habilitado** por el gating (su rol es el siguiente en
   jurídico→administrativo→técnico) y aún no ha emitido revisión sobre la última
   entrega.
-- **Rol administrativo / radicación / secop (trámites finales):** cuentas donde su
-  `TramiteFinal` (`SF`/`EC`/`SC`) está habilitado por la secuencia y aún no
+- **Rol administrativo / secop (trámites finales):** cuentas donde su
+  `TramiteFinal` (`SF`/`SC`) está habilitado por la secuencia y aún no
   realizado.
 
 **Tipos de notificación con color característico** (usa la paleta del proyecto;
@@ -380,9 +385,9 @@ genérico: refleja el avance real de la cuenta seleccionada.
 3. Asignación de revisores (pendiente / hecha).
 4. Revisión jurídica → administrativa → técnica (cuál está en curso, cuáles
    aprobadas, según las `RevisionCuentaCobro` de la última entrega).
-5. Decisión del supervisor para firma (`estado_supervisor`).
-6. Cargue de documentos de cierre por el contratista (completo/incompleto).
-7. Trámites finales `EC` → `SF` → `SC` (cuáles realizados).
+5. Decisión del supervisor para firma (`estado_supervisor`, `fecha_aprobacion_supervisor`).
+6. Cargue de documentos de cierre firmados por radicación (completo/incompleto).
+7. Trámites finales `SF` → `SC` (cuáles realizados).
 8. Cierre (`fecha_cierre`).
 
 **Comportamiento:**
@@ -474,7 +479,8 @@ grupo de Django, se resuelve por `AsignacionRevisor.rol` por cuenta. Por tanto:
 3. `urls.py` del módulo, incluido en el `urls.py` raíz.
 4. `forms.py`: cargue de documentos, acción "Entregar", revisión para radicación,
    revisión por rol, asignación, decisión del supervisor (con comentario obligatorio
-   en rechazo), cargue de cierre (contratista), y los tres `TramiteFinal` (sí/no +
+   en rechazo), cargue de cierre firmado (radicación; selección de `tipo_documento`
+   sobre los obligatorios de la vigencia), y los dos `TramiteFinal` (sí/no +
    evidencia + comentario, respetando que evidencia exige `realizado=True`).
 5. Permisos: **reutiliza** los mixins existentes (`cuentas.mixins.RolRequeridoMixin`
    y los mixins por rol del módulo en su `mixins.py`). Aplica el mixin apropiado a
@@ -506,17 +512,21 @@ grupo de Django, se resuelve por `AsignacionRevisor.rol` por cuenta. Por tanto:
    `EventoTrazabilidad`.
 8. Tests (`tests/`): camino feliz completo (cargue → "Entregar" → radicación →
    asignación → revisión jurídica→admin→técnica → decisión supervisor → cargue de
-   cierre por contratista → trámites finales `EC`→`SF`→`SC` → cierre); gating
+   cierre firmado por radicación → trámites finales `SF`→`SC` → cierre); gating
    secuencial (que `TE` no arranque sin `AD`); completitud (falta un obligatorio →
    no avanza); declinación + reasignación; **reinicio TOTAL desde jurídico** (ante
    cualquier devolución, la nueva versión nace vacía, el contratista reentrega el
    paquete completo y los tres roles re-revisan desde cero; el archivo de la versión
    previa se preserva); creación automática de versión vía "Entregar" (no manual);
-   `TramiteFinal` (evidencia exige `realizado=True`; secuencialidad `EC`→`SF`→`SC`;
-   cada paso solo por su rol); rechazo del supervisor; bloqueo de nuevas entregas
-   tras aprobación; y **la línea de tiempo**: que cada transición deja su evento, que
-   las devoluciones se marcan,
-   y que el alcance por rol restringe el acceso correctamente.
+   `TramiteFinal` (evidencia exige `realizado=True`; secuencialidad `SF`→`SC`;
+   cada paso solo por su rol); cargue de cierre por radicación (no contratista);
+   completitud de cierre contra los obligatorios de la vigencia; que
+   `revisar_supervisor` con `AP` setea `fecha_aprobacion_supervisor` (y con `RE` la
+   deja en `None`); que una `RevisionCuentaCobro` con `AP` se rechaza si algún
+   documento está `PENDIENTE`/`RECHAZADO` y pasa con todos en `AP`/`NA`; rechazo del
+   supervisor; bloqueo de nuevas entregas tras aprobación; y **la línea de tiempo**:
+   que cada transición deja su evento, que las devoluciones se marcan, y que el
+   alcance por rol restringe el acceso correctamente.
 
 ## Decisiones ya resueltas
 
@@ -535,8 +545,8 @@ grupo de Django, se resuelve por `AsignacionRevisor.rol` por cuenta. Por tanto:
 - `migrate` corre sin errores.
 - El flujo es recorrible **end-to-end** por los distintos roles: cargue →
   "Entregar" → radicación → asignación → revisión secuencial (3 roles) → decisión
-  del supervisor (para firma) → cargue de cierre por el contratista → trámites
-  finales (`EC` radicación, `SF` administrativo, `SC` secop) → cierre.
+  del supervisor (para firma) → cargue de cierre firmado por radicación → trámites
+  finales (`SF` administrativo, `SC` secop) → cierre.
 - La completitud documental se valida contra `RequisitoDocumental`.
 - El gating secuencial (jurídico→administrativo→técnico) es inviolable desde la UI
   y desde servicios.
@@ -545,11 +555,12 @@ grupo de Django, se resuelve por `AsignacionRevisor.rol` por cuenta. Por tanto:
   archivo de la versión anterior se preserva. La versión se crea automáticamente con
   "Entregar", nunca de forma manual.
 - Un revisor que declinó no puede registrar revisiones.
-- El supervisor aprueba para firma (no carga documentos); el contratista carga los
-  documentos de cierre; no se cierra sin todos los `DocumentoCierre.Tipo`
-  parametrizados (hoy `IS` y `CC`) ni sin los tres `TramiteFinal` realizados.
+- El supervisor aprueba para firma (no carga documentos); **radicación** carga los
+  documentos de cierre firmados; no se cierra sin todos los tipos **obligatorios de
+  la vigencia** presentes como `DocumentoCierre` ni sin los dos `TramiteFinal`
+  realizados.
 - En un `TramiteFinal` no se puede adjuntar evidencia sin `realizado=True`, y cada
-  trámite solo lo responde su rol (radicación/administrativo/secop), en orden.
+  trámite solo lo responde su rol (administrativo/secop), en orden.
 - Tras aprobación del supervisor, no se admiten nuevas entregas ni revisiones del
   flujo de revisión.
 - Cada transición deja un `EventoTrazabilidad`.

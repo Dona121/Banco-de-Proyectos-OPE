@@ -130,11 +130,11 @@ def puede_marcar_documentos(user, cuenta):
 
 
 def puede_cargar_cierre(user, cuenta):
-    """El contratista dueño carga documentos de cierre tras la aprobación del
-    supervisor, mientras falte alguno."""
+    """El rol de radicación carga los documentos de cierre firmados tras la
+    aprobación del supervisor, mientras falte alguno."""
     if cuenta.estado_supervisor != _AP:
         return False
-    if not (es_contratista(user) and es_dueno(user, cuenta)):
+    if not es_radicacion(user):
         return False
     return bool(services.documentos_cierre_faltantes(cuenta))
 
@@ -146,8 +146,6 @@ def puede_responder_tramite(user, cuenta, tipo):
     if not services.tramite_habilitado(cuenta, tipo):
         return False
     Tipo = TramiteFinal.Tipo
-    if tipo == Tipo.ENTREGA_CIERRE:
-        return es_radicacion(user)
     if tipo == Tipo.CARGUE_SECOP:
         return es_secop(user)
     if tipo == Tipo.CARGUE_SIIFWEB:
@@ -196,8 +194,6 @@ def tramites_finales(cuenta):
     """Estado de cada trámite final para el detalle (habilitado/realizado)."""
     filas = []
     preguntas = {
-        TramiteFinal.Tipo.ENTREGA_CIERRE:
-            "¿Los documentos en físico se firmaron y fueron entregados al contratista?",
         TramiteFinal.Tipo.CARGUE_SIIFWEB: "¿Se cargó a SIIFWEB?",
         TramiteFinal.Tipo.CARGUE_SECOP: "¿Se cargó a SECOP II?",
     }

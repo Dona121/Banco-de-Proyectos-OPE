@@ -76,6 +76,12 @@ class VistasTest(TestCase):
         url = reverse("cuentas_cobro:entregar", args=[self.cuenta.pk])
         self.assertEqual(self.client.post(url, {}).status_code, 403)
 
+    def test_contratista_no_puede_cargar_cierre(self):
+        # La carga del cierre pasó a radicación: el contratista no accede (403).
+        self.client.force_login(self.contratista)
+        url = reverse("cuentas_cobro:cierre_cargar", args=[self.cuenta.pk])
+        self.assertEqual(self.client.post(url, {}).status_code, 403)
+
     def test_contratista_carga_documento(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
 

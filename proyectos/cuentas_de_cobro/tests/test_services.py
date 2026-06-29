@@ -8,7 +8,7 @@ from cuentas_de_cobro import selectors, services
 from cuentas_de_cobro.models import (
     AsignacionRevisor,
     CuentaEntrega,
-    DocumentoCierre,
+    DocumentosCuentaCobro,
     RequisitoDocumental,
     RevisionCuentaCobro,
     TipoDocumentoCargue,
@@ -99,17 +99,12 @@ class CaminoFelizTest(FlujoBaseTest):
         services.decidir_supervisor(cuenta, self.supervisor, ResRad.APROBADA, "aprobada")
         cuenta.refresh_from_db()
         self.assertEqual(cuenta.estado_supervisor, ResRad.APROBADA)
+        self.assertIsNotNone(cuenta.fecha_aprobacion_supervisor)
 
-        # El contratista carga los documentos de cierre.
-        services.cargar_documento_cierre(
-            cuenta, DocumentoCierre.Tipo.INFORME_SUPERVISION, _archivo(), self.contratista
-        )
-        services.cargar_documento_cierre(
-            cuenta, DocumentoCierre.Tipo.CERTIFICADO_CUMPLIMIENTO, _archivo(), self.contratista
-        )
-        # Trámites finales secuenciales por su rol; el tercero auto-cierra.
-        services.responder_tramite(
-            cuenta, TramiteFinal.Tipo.ENTREGA_CIERRE, self.radicador, True, _archivo(), "entregado")
+        # Radicación carga los documentos de cierre firmados (mismos tipos del catálogo).
+        services.cargar_documento_cierre(cuenta, self.t1, _archivo(), self.radicador)
+        services.cargar_documento_cierre(cuenta, self.t2, _archivo(), self.radicador)
+        # Trámites finales secuenciales por su rol; el segundo auto-cierra.
         services.responder_tramite(
             cuenta, TramiteFinal.Tipo.CARGUE_SIIFWEB, self.rev_ad, True, _archivo(), "siif")
         services.responder_tramite(
@@ -194,6 +189,35 @@ class RechazoSupervisorTest(FlujoBaseTest):
         cuenta.refresh_from_db()
         self.assertEqual(cuenta.estado_supervisor, ResRad.RECHAZADA)
         self.assertEqual(cuenta.estado_revisores, ResRad.APROBADA)
+        # Al rechazar no se registra fecha de aprobación del supervisor.
+        self.assertIsNone(cuenta.fecha_aprobacion_supervisor)
+
+    def test_aprobacion_supervisor_registra_fecha(self):
+        cuenta = self._radicar(self._cuenta_con_documentos())
+        self._aprobar_revisores(cuenta)
+        services.decidir_supervisor(cuenta, self.supervisor, ResRad.APROBADA, "ok")
+        cuenta.refresh_from_db()
+        self.assertEqual(cuenta.estado_supervisor, ResRad.APROBADA)
+        self.assertIsNotNone(cuenta.fecha_aprobacion_supervisor)
+
+
+class RevisionAprobacionSegunDocsTest(FlujoBaseTest):
+    def test_no_aprueba_revision_con_documento_sin_resolver(self):
+        cuenta = self._radicar(self._cuenta_con_documentos())
+        a_ju, _, _ = self._asignar_todos(cuenta)
+        entrega = services.ultima_entrega(cuenta)
+        doc = entrega.documentoscuentacobro_set.first()
+        Estado = DocumentosCuentaCobro.EstadoDocumento
+        # El jurídico marca un documento como rechazado: no puede aprobar la revisión.
+        services.revisar_documento(doc, Estado.RECHAZADO, "corrige")
+        with self.assertRaises(ValidationError):
+            services.registrar_revision(a_ju, ResRev.APROBADA, "ok")
+        # Lo resuelve como "No aplica" → ahora todos están AP/NA y sí puede aprobar.
+        services.revisar_documento(doc, Estado.NO_APLICA, "no aplica")
+        services.registrar_revision(a_ju, ResRev.APROBADA, "ok")
+        self.assertTrue(
+            entrega.revisioncuentacobro_set.filter(rol=Rol.JURIDICO).exists()
+        )
 
 
 class MarcadoDocumentosTest(FlujoBaseTest):
@@ -237,37 +261,73 @@ class ReinicioTotalTest(FlujoBaseTest):
 
 
 class TramitesFinalesTest(FlujoBaseTest):
-    def _hasta_cierre(self):
+    def _hasta_supervisor(self):
+        """Hasta la aprobación del supervisor (sin cargar el cierre todavía)."""
         cuenta = self._radicar(self._cuenta_con_documentos())
         self._aprobar_revisores(cuenta)
         services.decidir_supervisor(cuenta, self.supervisor, ResRad.APROBADA, "ok")
         cuenta.refresh_from_db()
-        services.cargar_documento_cierre(
-            cuenta, DocumentoCierre.Tipo.INFORME_SUPERVISION, _archivo(), self.contratista)
-        services.cargar_documento_cierre(
-            cuenta, DocumentoCierre.Tipo.CERTIFICADO_CUMPLIMIENTO, _archivo(), self.contratista)
+        return cuenta
+
+    def _hasta_cierre(self):
+        cuenta = self._hasta_supervisor()
+        services.cargar_documento_cierre(cuenta, self.t1, _archivo(), self.radicador)
+        services.cargar_documento_cierre(cuenta, self.t2, _archivo(), self.radicador)
         cuenta.refresh_from_db()
         return cuenta
 
-    def test_secuencia_siif_requiere_entrega(self):
-        cuenta = self._hasta_cierre()
-        self.assertTrue(services.tramite_habilitado(cuenta, Tipo.ENTREGA_CIERRE))
+    def test_cierre_lo_carga_radicacion_no_el_contratista(self):
+        cuenta = self._hasta_supervisor()
+        self.assertTrue(selectors.puede_cargar_cierre(self.radicador, cuenta))
+        self.assertFalse(selectors.puede_cargar_cierre(self.contratista, cuenta))
+        with self.assertRaises(ValidationError):
+            services.cargar_documento_cierre(cuenta, self.t1, _archivo(), self.contratista)
+
+    def test_completitud_cierre_contra_obligatorios_de_vigencia(self):
+        cuenta = self._hasta_supervisor()
+        # Faltan ambos obligatorios.
+        self.assertEqual(
+            {t.id for t in services.documentos_cierre_faltantes(cuenta)},
+            {self.t1.id, self.t2.id},
+        )
+        services.cargar_documento_cierre(cuenta, self.t1, _archivo(), self.radicador)
+        self.assertEqual(
+            [t.id for t in services.documentos_cierre_faltantes(cuenta)], [self.t2.id]
+        )
+        services.cargar_documento_cierre(cuenta, self.t2, _archivo(), self.radicador)
+        self.assertEqual(services.documentos_cierre_faltantes(cuenta), [])
+
+    def test_siif_requiere_cierre_completo(self):
+        cuenta = self._hasta_supervisor()
+        # Sin cierre completo, SIIFWEB no se habilita.
         self.assertFalse(services.tramite_habilitado(cuenta, Tipo.CARGUE_SIIFWEB))
+        services.cargar_documento_cierre(cuenta, self.t1, _archivo(), self.radicador)
+        services.cargar_documento_cierre(cuenta, self.t2, _archivo(), self.radicador)
+        self.assertTrue(services.tramite_habilitado(cuenta, Tipo.CARGUE_SIIFWEB))
+
+    def test_secuencia_secop_requiere_siif(self):
+        cuenta = self._hasta_cierre()
+        self.assertTrue(services.tramite_habilitado(cuenta, Tipo.CARGUE_SIIFWEB))
+        self.assertFalse(services.tramite_habilitado(cuenta, Tipo.CARGUE_SECOP))
         with self.assertRaises(ValidationError):
             services.responder_tramite(
-                cuenta, Tipo.CARGUE_SIIFWEB, self.rev_ad, True, _archivo(), "x")
+                cuenta, Tipo.CARGUE_SECOP, self.secop, True, _archivo(), "x")
 
     def test_cada_tramite_solo_por_su_rol(self):
         cuenta = self._hasta_cierre()
-        # El secop NO puede responder el trámite de entrega (rol radicación).
-        self.assertFalse(selectors.puede_responder_tramite(self.secop, cuenta, Tipo.ENTREGA_CIERRE))
-        self.assertTrue(selectors.puede_responder_tramite(self.radicador, cuenta, Tipo.ENTREGA_CIERRE))
+        # SIIFWEB: solo el revisor administrativo. SECOP II: solo el rol de secop.
+        self.assertTrue(selectors.puede_responder_tramite(self.rev_ad, cuenta, Tipo.CARGUE_SIIFWEB))
+        self.assertFalse(selectors.puede_responder_tramite(self.secop, cuenta, Tipo.CARGUE_SIIFWEB))
+        # Tras SIIFWEB, SECOP II solo lo responde secop.
+        services.responder_tramite(cuenta, Tipo.CARGUE_SIIFWEB, self.rev_ad, True, _archivo(), "siif")
+        self.assertTrue(selectors.puede_responder_tramite(self.secop, cuenta, Tipo.CARGUE_SECOP))
+        self.assertFalse(selectors.puede_responder_tramite(self.rev_ad, cuenta, Tipo.CARGUE_SECOP))
 
     def test_evidencia_exige_realizado(self):
         cuenta = self._hasta_cierre()
         with self.assertRaises(ValidationError):
             services.responder_tramite(
-                cuenta, Tipo.ENTREGA_CIERRE, self.radicador, True, None, "sin evidencia")
+                cuenta, Tipo.CARGUE_SIIFWEB, self.rev_ad, True, None, "sin evidencia")
 
 
 class TrazabilidadTest(FlujoBaseTest):

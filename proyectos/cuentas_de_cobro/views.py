@@ -25,6 +25,7 @@ from .mixins import (
     ContratistaRequeridoMixin,
     MarcadoDocumentosRequeridoMixin,
     ModuloRequeridoMixin,
+    RadicacionRequeridoMixin,
     RevisorRequeridoMixin,
     SupervisorRequeridoMixin,
     TramiteFinalRequeridoMixin,
@@ -126,16 +127,25 @@ class CuentaDetailView(ModuloRequeridoMixin, DetailView):
         entrega = services.ultima_entrega(cuenta)
 
         ctx["entrega"] = entrega
-        ctx["documentos"] = (
-            entrega.documentoscuentacobro_set.select_related("tipo_documento")
-            .order_by("tipo_documento__nombre")
+        documentos = (
+            list(entrega.documentoscuentacobro_set.select_related("tipo_documento")
+                 .order_by("tipo_documento__nombre"))
             if entrega else []
+        )
+        ctx["documentos"] = documentos
+        # Guía para el revisor: no se puede aprobar la revisión mientras haya
+        # documentos en PENDIENTE (lo impone RevisionCuentaCobro.clean).
+        ctx["hay_docs_pendientes"] = any(
+            d.estado == DocumentosCuentaCobro.EstadoDocumento.PENDIENTE for d in documentos
         )
         ctx["entregas"] = cuenta.documentoentrega_set.order_by("-numero_version")
         ctx["tablero"] = selectors.tablero_revisiones(cuenta)
         ctx["faltantes"] = services.documentos_faltantes(cuenta)
         ctx["radicaciones"] = cuenta.revisionpararadicacion_set.order_by("fecha_creacion")
-        ctx["docs_cierre"] = cuenta.documentocierre_set.order_by("tipo")
+        ctx["docs_cierre"] = (
+            cuenta.documentocierre_set.select_related("tipo_documento")
+            .order_by("tipo_documento__nombre")
+        )
         ctx["cierre_faltantes"] = services.documentos_cierre_faltantes(cuenta)
 
         # Trámites finales (con permiso por fila).
@@ -180,7 +190,7 @@ class CuentaDetailView(ModuloRequeridoMixin, DetailView):
         ctx["revision_form"] = RevisionForm()
         ctx["declinar_form"] = DeclinarForm()
         ctx["decision_form"] = DecisionSupervisorForm()
-        ctx["cierre_form"] = DocumentoCierreForm()
+        ctx["cierre_form"] = DocumentoCierreForm(cuenta=cuenta)
         ctx["tramite_form"] = TramiteFinalForm()
         ctx["estado_doc_choices"] = DocumentosCuentaCobro.EstadoDocumento.choices
 
@@ -406,18 +416,18 @@ class DecisionSupervisorView(SupervisorRequeridoMixin, _AccionCuentaMixin):
         return self.volver(cuenta)
 
 
-class DocumentoCierreView(ContratistaRequeridoMixin, _AccionCuentaMixin):
+class DocumentoCierreView(RadicacionRequeridoMixin, _AccionCuentaMixin):
     def post(self, request, pk):
         cuenta = self.get_cuenta(request, pk)
         _exigir(selectors.puede_cargar_cierre(request.user, cuenta))
-        form = DocumentoCierreForm(request.POST, request.FILES)
+        form = DocumentoCierreForm(request.POST, request.FILES, cuenta=cuenta)
         if form.is_valid():
             try:
                 services.cargar_documento_cierre(
-                    cuenta, form.cleaned_data["tipo"],
+                    cuenta, form.cleaned_data["tipo_documento"],
                     form.cleaned_data["documento"], request.user,
                 )
-                messages.success(request, "Documento de cierre cargado.")
+                messages.success(request, "Documento de cierre firmado cargado.")
             except ValidationError as exc:
                 messages.error(request, "; ".join(exc.messages))
         else:
