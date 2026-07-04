@@ -1,13 +1,15 @@
 """Vistas de autenticación y perfil."""
 from django.contrib.auth import get_user_model
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.contrib.auth.views import LoginView, LogoutView
+from django.contrib.auth.views import LoginView, LogoutView, PasswordChangeView
+from django.contrib.messages.views import SuccessMessageMixin
 from django.db.models import Q
+from django.urls import reverse_lazy
 from django.views.generic import TemplateView
 
 from contenido.models import Actividades, ActividadEntrega, Proyectos, Revisiones
 
-from .forms import LoginForm
+from .forms import CambiarPasswordForm, LoginForm
 
 User = get_user_model()
 
@@ -20,6 +22,24 @@ class AppLoginView(LoginView):
 
 class AppLogoutView(LogoutView):
     pass
+
+
+class CambiarPasswordView(SuccessMessageMixin, PasswordChangeView):
+    """Cambio de contraseña del usuario autenticado. ``PasswordChangeView`` ya
+    exige login y mantiene la sesión activa tras el cambio."""
+
+    template_name = "cuentas/cambiar_password.html"
+    form_class = CambiarPasswordForm
+    success_url = reverse_lazy("cuentas:perfil")
+    success_message = "Tu contraseña se actualizó correctamente."
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx["breadcrumbs"] = [
+            ("Mi perfil", reverse_lazy("cuentas:perfil")),
+            ("Cambiar contraseña", None),
+        ]
+        return ctx
 
 
 class PerfilView(LoginRequiredMixin, TemplateView):
