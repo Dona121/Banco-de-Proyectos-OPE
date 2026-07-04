@@ -22,12 +22,21 @@ La plataforma tiene **dos aplicaciones independientes**:
 # Aplicación 1 · Proyectos
 
 El flujo va de arriba hacia abajo: el **Director** crea el proyecto y se lo
-entrega a un **Coordinador**; el Coordinador lo organiza en actividades y se las
-reparte a los **Formuladores**; el Formulador hace el trabajo y lo entrega; el
-Coordinador lo revisa y lo aprueba.
+entrega a un **Coordinador**; luego se crean las actividades y se asignan a quien
+las va a realizar; esa persona la ejecuta y la entrega; y la revisa quien
+corresponde según quién la hizo.
+
+**Quién asigna las actividades:**
+- El **coordinador** asigna actividades a **formuladores**.
+- El **director** también puede asignar actividades: a un **coordinador** o a un **formulador**.
+
+**Quién revisa (regla clave):**
+- Si la actividad la ejecutó un **formulador** → la revisa el **coordinador** del proyecto.
+- Si la ejecutó un **coordinador** → la revisa el **director** del proyecto.
 
 ```
-Director  →  Coordinador  →  Formulador  →  (revisa) Coordinador  →  Fin
+Director → Coordinador → (ejecuta) Formulador o Coordinador
+                       → (revisa) Coordinador o Director → Fin
 ```
 
 ## Director
@@ -37,29 +46,42 @@ Director  →  Coordinador  →  Formulador  →  (revisa) Coordinador  →  Fin
 **Qué puede hacer (permisos):**
 - Crear y editar proyectos.
 - Asignar cada proyecto a un coordinador.
+- **Asignar actividades** de sus proyectos, a un **coordinador** o a un **formulador**.
+- **Revisar** las entregas de las actividades que le asignó a un **coordinador**.
 - Ver los proyectos, sus actividades y el avance.
 - Consultar los reportes.
 
 **En qué procesos participa y qué hace:**
 1. **Crear el proyecto.** Registra el proyecto con sus datos.
 2. **Asignar un coordinador.** Elige al coordinador responsable de gestionarlo.
+3. **Asignar actividades (opcional).** Dentro de sus proyectos crea actividades,
+   les pone fecha de entrega y se las asigna a un coordinador o a un formulador.
+4. **Revisar.** Cuando un **coordinador** entrega una actividad que el director le
+   asignó, el director la revisa y decide: **Aprobada** (queda terminada) o
+   **Requiere ajustes / Rechazada** (vuelve al coordinador para corregir).
 
 **Qué se activa cuando actúa:**
 - Al **asignar el proyecto a un coordinador**, a ese coordinador le aparece un
-  aviso de “Proyecto asignado: agrega sus actividades”. El proyecto queda a la
-  espera de que el coordinador lo organice.
+  aviso de “Proyecto asignado: agrega sus actividades”.
+- Al **asignar una actividad**, al responsable (coordinador o formulador) le llega
+  el aviso “Actividad asignada: realízala y entrégala”.
+- Cuando un **coordinador** le entrega una actividad, al director le llega el
+  aviso “Actividad por revisar”.
 
 ## Coordinador
 
 **Quién es:** la persona que recibe un proyecto, lo divide en actividades y
-revisa el trabajo de los formuladores.
+revisa el trabajo de los formuladores. También puede recibir del director una
+actividad para **ejecutarla** él mismo.
 
 **Qué puede hacer (permisos):**
 - Ver los proyectos que le asignaron.
 - Crear actividades dentro de esos proyectos, ponerles fecha de entrega y
   asignárselas a un formulador.
 - Dividir una actividad grande en subactividades (sus pasos más pequeños).
-- Revisar las entregas de los formuladores y aprobarlas o pedir correcciones.
+- Revisar las entregas de los **formuladores** y aprobarlas o pedir correcciones.
+- **Ejecutar y entregar** las actividades que el **director** le asigne (esas las
+  revisa el director, no él mismo).
 
 **En qué procesos participa y qué hace:**
 1. **Organizar el proyecto.** Crea las actividades, les pone plazo y se las
@@ -69,6 +91,8 @@ revisa el trabajo de los formuladores.
    decide:
    - **Aprobada** → la actividad queda terminada.
    - **Requiere ajustes** o **Rechazada** → vuelve al formulador para que corrija.
+3. **Ejecutar (cuando el director le asigna una actividad).** La realiza y la
+   entrega, igual que un formulador; su revisión la hace el **director**.
 
 **Qué se activa cuando actúa:**
 - Al **asignar una actividad** a un formulador, a ese formulador le llega el aviso
@@ -77,6 +101,8 @@ revisa el trabajo de los formuladores.
   avanza.
 - Al **pedir ajustes o rechazar**, la actividad vuelve al formulador, a quien le
   llega el aviso “Te pidieron ajustes: corrige y vuelve a entregar”.
+- Cuando **entrega** una actividad que le asignó el director, a este le llega el
+  aviso “Actividad por revisar”.
 
 ## Formulador
 
@@ -269,8 +295,8 @@ tener que estar buscando.
 
 | Aplicación | Rol | En una frase |
 |---|---|---|
-| Proyectos | **Director** | Crea proyectos y los asigna a un coordinador. |
-| Proyectos | **Coordinador** | Organiza el proyecto en actividades y revisa las entregas. |
+| Proyectos | **Director** | Crea proyectos, los asigna a un coordinador y puede asignar actividades (a coordinadores o formuladores), revisando lo que ejecuta un coordinador. |
+| Proyectos | **Coordinador** | Organiza el proyecto en actividades, revisa el trabajo de los formuladores y puede ejecutar actividades que le asigne el director. |
 | Proyectos | **Formulador** | Realiza las actividades y las entrega. |
 | Cuentas de cobro | **Contratista** | Arma su cuenta del mes y la entrega. |
 | Cuentas de cobro | **Radicación** | Hace la primera revisión y carga los documentos de cierre firmados. |

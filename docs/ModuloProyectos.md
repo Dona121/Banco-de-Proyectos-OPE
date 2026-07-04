@@ -34,6 +34,8 @@ Roles:
 
 * Crea proyectos.
 * Asigna proyectos a coordinadores.
+* Asigna actividades (a coordinadores o formuladores).
+* Revisa las entregas de las actividades que ejecuta un coordinador.
 * Supervisa avance general.
 
 ### Coordinador
@@ -42,8 +44,8 @@ Roles:
 * Crea actividades.
 * Crea subactividades.
 * Asigna actividades a formuladores.
-* Revisa entregas.
-* Aprueba o solicita ajustes.
+* Revisa las entregas de los formuladores; aprueba o solicita ajustes.
+* Ejecuta y entrega las actividades que le asigne el director (esas las revisa el director).
 
 ### Formulador
 
@@ -52,6 +54,10 @@ Roles:
 * Adjunta documentos.
 * Atiende observaciones.
 * Genera nuevas versiones cuando existan ajustes.
+
+> **Regla de revisión:** la entrega la revisa el **coordinador del proyecto** si
+> quien la ejecutó es un formulador, y el **director del proyecto** si quien la
+> ejecutó es un coordinador. (Fuente única: `web.selectors.responsable_revision`.)
 
 ---
 
@@ -72,13 +78,15 @@ Posibles estados de actividad:
 
 Flujo esperado:
 
-1. Director crea proyecto.
-2. Coordinador crea actividad.
-3. Formulador realiza entrega.
-4. Coordinador revisa.
+1. Director crea proyecto y asigna coordinador.
+2. Se crea la actividad y se asigna a quien la ejecuta: el coordinador la asigna a
+   un formulador; el director puede asignarla a un coordinador o a un formulador.
+3. El responsable (formulador o coordinador) realiza la entrega.
+4. Revisa quien corresponde: el **coordinador** del proyecto si la ejecutó un
+   formulador; el **director** si la ejecutó un coordinador.
 5. Si requiere ajustes:
 
-   * Se crea una nueva entrega.
+   * Se crea una nueva entrega (la corrige quien la ejecutó).
 6. Si se aprueba:
 
    * La actividad queda finalizada.
@@ -331,6 +339,8 @@ La información debe incluir:
   * Mostrar cuántos días han transcurrido desde la fecha de creación de la entrega.
   * Identificar entregas con más de X días sin revisión.
 * Ranking o listado de coordinadores con mayor cantidad de entregas pendientes.
+* Entregas **pendientes de la revisión del propio director**: las de actividades
+  ejecutadas por un coordinador (que el director debe revisar), con su antigüedad.
 * Indicadores de cumplimiento por proyecto.
 * Actividades próximas a vencer.
 * Actividades vencidas.

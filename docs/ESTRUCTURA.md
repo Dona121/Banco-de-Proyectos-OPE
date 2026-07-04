@@ -62,7 +62,7 @@ Modelos (en `contenido/models.py`, **no modificar**):
 | Modelo | Campos clave | Notas |
 |---|---|---|
 | `Proyectos` | nombre, creador_por (Director), asignado_a (Coordinador) | hereda `Fechas` (creación/actualización) |
-| `Actividades` | proyecto, nombre, fecha_programada, fecha_vencimiento, **estado**, asignado_por (Coord), asignado_a (Formulador) | `estado ∈ {PE Pendiente, ER En revisión, AJ Requiere ajustes, AP Aprobada}`; `clean()` valida fechas |
+| `Actividades` | proyecto, nombre, fecha_programada, fecha_vencimiento, **estado**, asignado_por (Coord o Director), asignado_a (Formulador o Coordinador ejecutor) | `estado ∈ {PE Pendiente, ER En revisión, AJ Requiere ajustes, AP Aprobada}`; `clean()` valida fechas |
 | `Subactividades` | nombre, actividad | |
 | `ActividadEntrega` | actividad, numero_version, usuario, comentario | `numero_version` autoincremental por actividad; `clean()` bloquea entregas si la actividad está Aprobada |
 | `Documentos` | actividad_entrega, nombre, archivo (FileField) | |
@@ -81,9 +81,9 @@ Modelos (en `contenido/models.py`, **no modificar**):
 | `mixins.py` | `RolRequeridoMixin` y derivados (`DirectorRequeridoMixin`, `GestionRequeridoMixin`, …) para CBVs. |
 | `decorators.py` | `@rol_requerido(...)` para FBVs. |
 | `context_processors.py` | Expone `es_director/es_coordinador/es_formulador/rol_principal` a todas las plantillas. |
-| `forms.py` | `LoginForm` estilizado. |
-| `views.py` | `AppLoginView`, `AppLogoutView`, `PerfilView`. |
-| `urls.py` | `cuentas:login`, `cuentas:logout`, `cuentas:perfil`. |
+| `forms.py` | `LoginForm` y `CambiarPasswordForm` (cambio de contraseña) estilizados. |
+| `views.py` | `AppLoginView`, `AppLogoutView`, `PerfilView`, `CambiarPasswordView` (basada en `PasswordChangeView`; mantiene la sesión y redirige a Mi perfil con mensaje de éxito). |
+| `urls.py` | `cuentas:login`, `cuentas:logout`, `cuentas:perfil`, `cuentas:cambiar_password` (`perfil/contrasena/`). |
 
 > Los roles de **proyectos** (Director/Coordinador/Formulador) viven aquí. El módulo de **cuentas de cobro** define sus propios roles y mixins en `cuentas_de_cobro/roles.py` y `cuentas_de_cobro/mixins.py` (reutilizando `RolRequeridoMixin`).
 
@@ -93,8 +93,8 @@ Modelos (en `contenido/models.py`, **no modificar**):
 
 | Archivo | Responsabilidad |
 |---|---|
-| `selectors.py` | **Querysets filtrados por rol** (Director: sus proyectos; Coordinador: asignados; Formulador: sus actividades). Punto único de scoping ("un usuario nunca ve lo que no le corresponde"). |
-| `services.py` | **Transiciones de estado**: `crear_entrega()` (→ actividad En revisión), `registrar_revision()` (→ Aprobada / Requiere ajustes). También `notificaciones_para(user)`: pendientes derivados (proyecto/actividad asignada, actividad por revisar, ajustes pedidos, plazos por cumplirse/vencidos). |
+| `selectors.py` | **Querysets filtrados por rol** (Director: sus proyectos; Coordinador: los que coordina **y** las actividades que le asignaron como ejecutor; Formulador: sus actividades). Punto único de scoping. Además `responsable_revision(actividad)` (**fuente única** de quién revisa: coordinador del proyecto si la ejecuta un formulador, director si la ejecuta un coordinador), `puede_revisar()` y `entregas_por_revisar(user)`. |
+| `services.py` | **Transiciones de estado**: `crear_entrega()` (→ actividad En revisión), `registrar_revision()` (→ Aprobada / Requiere ajustes). También `notificaciones_para(user)`: pendientes derivados (proyecto/actividad asignada, **actividad por revisar dirigida a su revisor real** —coordinador o director—, ajustes pedidos, plazos por cumplirse/vencidos). |
 | `context_processors.py` | `notificaciones_web`: expone `web_notificaciones` / `web_notificaciones_total` al topbar (campana de proyectos). |
 | `metrics.py` | Métricas de dashboards por rol (`director()`, `coordinador()`, `formulador()`). |
 | `forms.py` | `ProyectoForm`, `ActividadForm`, `SubactividadForm`, `EntregaForm`, `DocumentoForm`, `RevisionForm` (estilizados). |
@@ -112,14 +112,14 @@ Modelos (en `contenido/models.py`, **no modificar**):
 | `/proyectos/nuevo/` | `proyecto_nuevo` | `ProyectoCreateView` | Director |
 | `/proyectos/<pk>/` | `proyecto_detalle` | `ProyectoDetailView` | scoping |
 | `/proyectos/<pk>/editar/` | `proyecto_editar` | `ProyectoUpdateView` | Director |
-| `/proyectos/<pk>/actividades/nueva/` | `actividad_nueva` | `ActividadCreateView` | Coordinador del proyecto |
+| `/proyectos/<pk>/actividades/nueva/` | `actividad_nueva` | `ActividadCreateView` | Director (dueño) o coordinador del proyecto |
 | `/actividades/` | `actividades` | `ActividadListView` (filtros estado/proyecto/buscador) | scoping |
 | `/actividades/<pk>/` | `actividad_detalle` | `ActividadDetailView` (timeline) | scoping |
 | `/actividades/<pk>/subactividades/nueva/` | `subactividad_nueva` | `SubactividadCreateView` | Coordinador |
-| `/actividades/<pk>/entregas/nueva/` | `entrega_nueva` | `EntregaCreateView` | Formulador asignado |
+| `/actividades/<pk>/entregas/nueva/` | `entrega_nueva` | `EntregaCreateView` | Ejecutor asignado (formulador o coordinador) |
 | `/entregas/<pk>/` | `entrega_detalle` | `EntregaDetailView` | scoping |
-| `/entregas/<pk>/documentos/nuevo/` | `documento_nuevo` | `DocumentoCreateView` | Formulador dueño |
-| `/entregas/<pk>/revisar/` | `revision_nueva` | `RevisionCreateView` | Coordinador del proyecto |
+| `/entregas/<pk>/documentos/nuevo/` | `documento_nuevo` | `DocumentoCreateView` | Ejecutor dueño de la entrega |
+| `/entregas/<pk>/revisar/` | `revision_nueva` | `RevisionCreateView` | Revisor real (coordinador o director, según `responsable_revision`) |
 | `/reportes/` | `reportes` | `ReportesIndexView` | autenticado |
 | `/reportes/proyectos-formulados.xlsx` | `reporte_formulados_excel` | FBV | autenticado |
 | `/reportes/avance-por-proyecto.pdf` | `reporte_avance_pdf` | FBV | autenticado |
@@ -129,11 +129,11 @@ Modelos (en `contenido/models.py`, **no modificar**):
 ## Flujo de negocio
 
 1. **Director** crea proyecto y lo asigna a un **Coordinador**.
-2. **Coordinador** crea actividades (y subactividades), las asigna a un **Formulador** (estado inicial: Pendiente).
-3. **Formulador** registra una **entrega** (versión) → la actividad pasa a **En revisión**; adjunta documentos.
-4. **Coordinador** revisa la entrega:
+2. Se crean actividades (y subactividades) y se asignan a quien las ejecuta: el **Coordinador** las asigna a **Formuladores**; el **Director** puede asignarlas a un **Coordinador** o a un **Formulador** (estado inicial: Pendiente).
+3. El **ejecutor** (formulador o coordinador) registra una **entrega** (versión) → la actividad pasa a **En revisión**; adjunta documentos.
+4. **Revisa quien corresponde** (`responsable_revision`): el **Coordinador** del proyecto si la ejecutó un formulador; el **Director** si la ejecutó un coordinador.
    - **Aprobada** → actividad **Aprobada** (finalizada).
-   - **Requiere ajustes / Rechazada** → actividad **Requiere ajustes**; el formulador crea una nueva entrega.
+   - **Requiere ajustes / Rechazada** → actividad **Requiere ajustes**; el ejecutor crea una nueva entrega.
 
 Colores de estado: Pendiente (gris), En revisión (azul), Requiere ajustes (ámbar), Aprobada (verde), Vencida/Rechazada (rojo).
 
@@ -143,8 +143,8 @@ Colores de estado: Pendiente (gris), En revisión (azul), Requiere ajustes (ámb
 
 Plantillas en `templates/web/dashboard/{director,coordinador,formulador,generico}.html`; datos en `web/metrics.py`. KPI cards, gráfico de estados (barra apilada), barras de avance, tablas resumidas, badges y alertas.
 
-- **Director (ejecutivo):** proyectos, coordinadores, pendientes de revisión (con antigüedad/atrasadas), vencidas; resumen/ranking por coordinador; cumplimiento por proyecto; próximas/vencidas.
-- **Coordinador (operativo):** actividades, pendientes de revisión (acceso rápido a *Revisar*), tiempo promedio de revisión, formuladores con más pendientes, revisadas recientes, proyectos a cargo.
+- **Director (ejecutivo):** proyectos, coordinadores, **pendientes de su propia revisión** (actividades ejecutadas por coordinadores, con antigüedad/atrasadas), vencidas; resumen/ranking por coordinador (con su backlog de revisión de formuladores); cumplimiento por proyecto; próximas/vencidas.
+- **Coordinador (operativo):** actividades, **pendientes de su revisión** (entregas de formuladores; acceso rápido a *Revisar*), tiempo promedio de revisión, formuladores con más pendientes, revisadas recientes, proyectos a cargo.
 - **Formulador (personal):** mis actividades, en revisión, requieren ajustes, vencidas; por proyecto/estado; "requieren nueva entrega" y "sin ninguna entrega" con acción directa; días restantes; historial.
 
 ---
@@ -202,7 +202,7 @@ Cada campana se muestra solo si el usuario pertenece a ese dominio. Color por ti
 - `base.html` — esqueleto (Tailwind CDN config de marca, fuentes, HTMX/Alpine, `app.css`, favicon escudo, toasts).
 - `base_app.html` — shell de la app: **sidebar** (verde oscuro sólido, menú por rol, escudo blanco), **topbar** (breadcrumbs, **campanas de notificaciones**, menú de usuario), contenido.
 - `components/` — `nav_item.html`, `form_field.html`, `paginacion.html`, `estado_bar.html` (gráfico de estados), `lista_actividades.html`.
-- `cuentas/` — `login.html` (panel de marca + formulario), `perfil.html`.
+- `cuentas/` — `login.html` (panel de marca + formulario), `perfil.html`, `cambiar_password.html`.
 - `web/` — `proyectos/`, `actividades/`, `entregas/`, `dashboard/`, `reportes/`; `web/_notificaciones.html` (campana de proyectos); `web/actividades/_flujograma.html` + `_flecha.html` (flujograma del proceso completo: proyecto → actividad → subactividad).
 - `cuentas_cobro/` — `bandeja.html`, `cuenta_form.html`, `cuenta_detalle.html`; `_notificaciones.html` (campana), `_flujograma.html` + `_flecha.html` (flujograma del proceso). Los modales usan `x-teleport="body"` para no quedar atrapados en el stacking context de `<main>`.
 
