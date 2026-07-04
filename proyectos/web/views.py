@@ -124,9 +124,13 @@ class ProyectoDetailView(LoginRequiredMixin, DetailView):
             .order_by("fecha_vencimiento")
         )
         ctx["puede_crear_actividad"] = (
-            es_coordinador(self.request.user)
-            and proyecto.asignado_a_id == self.request.user.id
-        ) or self.request.user.is_superuser
+            self.request.user.is_superuser
+            or es_director(self.request.user)
+            or (
+                es_coordinador(self.request.user)
+                and proyecto.asignado_a_id == self.request.user.id
+            )
+        )
         ctx["breadcrumbs"] = [
             ("Proyectos", reverse("web:proyectos")),
             (proyecto.nombre, None),
@@ -257,18 +261,28 @@ class ActividadDetailView(LoginRequiredMixin, DetailView):
 
 
 class ActividadCreateView(GestionRequeridoMixin, CreateView):
-    """Crear actividad dentro de un proyecto (coordinador del proyecto)."""
+    """Crear/asignar actividad dentro de un proyecto.
+
+    La crea el coordinador del proyecto o el director (dueño del proyecto). El
+    alcance de `proyectos_visibles` ya limita cada rol a sus propios proyectos.
+    """
 
     template_name = "web/actividades/form.html"
     form_class = ActividadForm
-    roles_permitidos = (COORDINADOR,)
+    roles_permitidos = (DIRECTOR, COORDINADOR)
 
     def dispatch(self, request, *args, **kwargs):
         self.proyecto = get_object_or_404(
             selectors.proyectos_visibles(request.user), pk=kwargs["proyecto_pk"]
         )
-        if not request.user.is_superuser and self.proyecto.asignado_a_id != request.user.id:
-            raise PermissionDenied("Solo el coordinador del proyecto crea actividades.")
+        if not (
+            request.user.is_superuser
+            or es_director(request.user)
+            or self.proyecto.asignado_a_id == request.user.id
+        ):
+            raise PermissionDenied(
+                "Solo el director o el coordinador del proyecto crea actividades."
+            )
         return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form):
