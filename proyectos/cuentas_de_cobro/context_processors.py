@@ -35,7 +35,10 @@ def roles_cuentas_cobro(request):
     if user is None or not user.is_authenticated:
         return {}
     if not usa_modulo(user):
-        return {"cc_usa_modulo": False}
+        # `cc_rol_principal` se expone siempre (vacío aquí) porque la plantilla lo
+        # usa como argumento de filtro `default:`, y un argumento inexistente
+        # provoca VariableDoesNotExist al renderizar.
+        return {"cc_usa_modulo": False, "cc_rol_principal": ""}
     notificaciones = services.notificaciones_para(user)
     return {
         "cc_es_contratista": es_contratista(user),
