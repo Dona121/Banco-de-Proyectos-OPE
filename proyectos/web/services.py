@@ -10,7 +10,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from contenido.models import Actividades, ActividadEntrega, Proyectos, Revisiones
-from cuentas.roles import es_coordinador, es_formulador
+from cuentas.roles import COORDINADOR, es_coordinador, es_director
 
 Estado = Actividades.EstadoActividad
 Resultado = Revisiones.ResultadoRevision
@@ -88,7 +88,8 @@ def notificaciones_para(user):
     ahora = timezone.now()
     limite = ahora + timedelta(days=DIAS_AVISO_PLAZO)
 
-    # Coordinador: proyectos que se le asignaron y actividades que le toca revisar.
+    # Coordinador: proyectos por poblar y actividades por revisar cuyo ejecutor es
+    # un formulador (las ejecutadas por un coordinador las revisa el director).
     if es_coordinador(user):
         for p in Proyectos.objects.filter(asignado_a=user):
             if not p.actividades_set.exists():
@@ -100,7 +101,7 @@ def notificaciones_para(user):
                 ))
         for a in Actividades.objects.filter(
             proyecto__asignado_a=user, estado=Estado.EN_REVISION
-        ).select_related("proyecto"):
+        ).exclude(asignado_a__groups__name=COORDINADOR).select_related("proyecto"):
             items.append(_notif(
                 NOTIF_REVISION,
                 f"Actividad por revisar: {a.nombre}",
@@ -108,26 +109,40 @@ def notificaciones_para(user):
                 a.proyecto.nombre,
             ))
 
-    # Formulador: actividades que le asignaron y las que le devolvieron.
-    if es_formulador(user):
+    # Director: actividades por revisar cuyo ejecutor es un coordinador (delegadas
+    # por él) en los proyectos que creó.
+    if es_director(user):
         for a in Actividades.objects.filter(
-            asignado_a=user, estado=Estado.PENDIENTE
-        ).select_related("proyecto"):
+            proyecto__creador_por=user, estado=Estado.EN_REVISION,
+            asignado_a__groups__name=COORDINADOR,
+        ).select_related("proyecto").distinct():
             items.append(_notif(
-                NOTIF_ASIGNACION,
-                f"Actividad asignada: realízala y entrégala — {a.nombre}",
+                NOTIF_REVISION,
+                f"Actividad por revisar: {a.nombre}",
                 reverse("web:actividad_detalle", args=[a.pk]),
                 a.proyecto.nombre,
             ))
-        for a in Actividades.objects.filter(
-            asignado_a=user, estado=Estado.AJUSTES
-        ).select_related("proyecto"):
-            items.append(_notif(
-                NOTIF_DEVOLUCION,
-                f"Te pidieron ajustes: corrige y vuelve a entregar — {a.nombre}",
-                reverse("web:actividad_detalle", args=[a.pk]),
-                a.proyecto.nombre,
-            ))
+
+    # Ejecutor (formulador, o coordinador con actividad asignada): lo asignado y lo
+    # devuelto para corrección.
+    for a in Actividades.objects.filter(
+        asignado_a=user, estado=Estado.PENDIENTE
+    ).select_related("proyecto"):
+        items.append(_notif(
+            NOTIF_ASIGNACION,
+            f"Actividad asignada: realízala y entrégala — {a.nombre}",
+            reverse("web:actividad_detalle", args=[a.pk]),
+            a.proyecto.nombre,
+        ))
+    for a in Actividades.objects.filter(
+        asignado_a=user, estado=Estado.AJUSTES
+    ).select_related("proyecto"):
+        items.append(_notif(
+            NOTIF_DEVOLUCION,
+            f"Te pidieron ajustes: corrige y vuelve a entregar — {a.nombre}",
+            reverse("web:actividad_detalle", args=[a.pk]),
+            a.proyecto.nombre,
+        ))
 
     # Plazos por cumplirse o vencidos (para el responsable de la actividad).
     for a in Actividades.objects.filter(

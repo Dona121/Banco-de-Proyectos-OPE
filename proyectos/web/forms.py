@@ -10,7 +10,7 @@ from contenido.models import (
     Revisiones,
     Subactividades,
 )
-from cuentas.roles import COORDINADOR, FORMULADOR
+from cuentas.roles import COORDINADOR, FORMULADOR, es_director
 
 User = get_user_model()
 
@@ -73,9 +73,17 @@ class ActividadForm(EstilizadoMixin, forms.ModelForm):
         }
         labels = {"asignado_a": "Formulador asignado"}
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["asignado_a"].queryset = _usuarios_de(FORMULADOR)
+        # El director puede asignar a coordinadores o formuladores; el coordinador
+        # solo a formuladores.
+        if user is not None and es_director(user):
+            self.fields["asignado_a"].queryset = User.objects.filter(
+                groups__name__in=(COORDINADOR, FORMULADOR), is_active=True
+            ).distinct().order_by("first_name", "username")
+            self.fields["asignado_a"].label = "Responsable asignado"
+        else:
+            self.fields["asignado_a"].queryset = _usuarios_de(FORMULADOR)
         for nombre in ("fecha_programada", "fecha_vencimiento"):
             self.fields[nombre].input_formats = ["%Y-%m-%dT%H:%M"]
 

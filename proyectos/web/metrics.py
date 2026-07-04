@@ -6,7 +6,8 @@ los selectores (que ya filtran por rol). Sin tocar la estructura de datos.
 from django.db.models import Avg, Count, DurationField, ExpressionWrapper, F, Q
 from django.utils import timezone
 
-from contenido.models import Actividades
+from contenido.models import Actividades, ActividadEntrega
+from cuentas.roles import COORDINADOR
 
 from . import selectors
 
@@ -72,13 +73,14 @@ def director(user):
     ahora = timezone.now()
     proyectos = selectors.proyectos_visibles(user)
     actividades = selectors.actividades_visibles(user)
-    entregas = selectors.entregas_visibles(user)
 
-    pendientes = _pendientes_revision(entregas, ahora)
+    # Pendientes de MI revisión (actividades ejecutadas por un coordinador).
+    pendientes = _pendientes_revision(selectors.entregas_por_revisar(user), ahora)
     proximas, vencidas = _proximas_y_vencidas(actividades, ahora)
     segmentos, total_act = _distribucion_estado(actividades)
 
-    # Resumen por coordinador (proyectos asignados, actividades, entregas pendientes).
+    # Resumen por coordinador (proyectos asignados, actividades, backlog propio de
+    # revisión: entregas de formuladores sin revisar en sus proyectos).
     coord = {}
     for p in proyectos.select_related("asignado_a"):
         c = p.asignado_a
@@ -89,10 +91,19 @@ def director(user):
         cid = row["proyecto__asignado_a"]
         if cid in coord:
             coord[cid]["actividades"] = row["c"]
-    for fila in pendientes:
-        cid = fila["entrega"].actividad.proyecto.asignado_a_id
+    backlog = (
+        ActividadEntrega.objects.filter(
+            revisiones__isnull=True, actividad__proyecto__in=proyectos
+        )
+        .exclude(actividad__estado=Estado.APROBADA)
+        .exclude(actividad__asignado_a__groups__name=COORDINADOR)
+        .values("actividad__proyecto__asignado_a")
+        .annotate(c=Count("id"))
+    )
+    for row in backlog:
+        cid = row["actividad__proyecto__asignado_a"]
         if cid in coord:
-            coord[cid]["pendientes"] += 1
+            coord[cid]["pendientes"] = row["c"]
     coordinadores = sorted(coord.values(), key=lambda x: -x["pendientes"])
 
     # Cumplimiento por proyecto (% aprobadas / total).
@@ -133,10 +144,11 @@ def coordinador(user):
     ahora = timezone.now()
     proyectos = selectors.proyectos_visibles(user)
     actividades = selectors.actividades_visibles(user)
-    entregas = selectors.entregas_visibles(user)
     revisiones = selectors.revisiones_visibles(user)
 
-    pendientes = _pendientes_revision(entregas, ahora)
+    # Pendientes de MI revisión (entregas de formuladores en mis proyectos); no
+    # incluye lo que yo mismo entregue como ejecutor (eso lo revisa el director).
+    pendientes = _pendientes_revision(selectors.entregas_por_revisar(user), ahora)
     proximas, vencidas = _proximas_y_vencidas(actividades, ahora)
     segmentos, total_act = _distribucion_estado(actividades)
 

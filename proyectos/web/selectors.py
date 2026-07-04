@@ -41,8 +41,11 @@ def actividades_visibles(user):
     if DIRECTOR in grupos:
         return qs.filter(proyecto__creador_por=user)
     if COORDINADOR in grupos:
-        # Todas las actividades de los proyectos que coordina.
-        return qs.filter(proyecto__asignado_a=user)
+        # Las actividades de los proyectos que coordina y, además, las que le
+        # asignaron a él como ejecutor (el director puede asignarle actividades).
+        return qs.filter(
+            Q(proyecto__asignado_a=user) | Q(asignado_a=user)
+        ).distinct()
     if FORMULADOR in grupos:
         return qs.filter(asignado_a=user)
     return qs.none()
@@ -61,7 +64,9 @@ def entregas_visibles(user):
     if DIRECTOR in grupos:
         return qs.filter(actividad__proyecto__creador_por=user)
     if COORDINADOR in grupos:
-        return qs.filter(actividad__proyecto__asignado_a=user)
+        return qs.filter(
+            Q(actividad__proyecto__asignado_a=user) | Q(actividad__asignado_a=user)
+        ).distinct()
     if FORMULADOR in grupos:
         return qs.filter(actividad__asignado_a=user)
     return qs.none()
@@ -80,7 +85,10 @@ def revisiones_visibles(user):
     if DIRECTOR in grupos:
         return qs.filter(actividad_entrega__actividad__proyecto__creador_por=user)
     if COORDINADOR in grupos:
-        return qs.filter(actividad_entrega__actividad__proyecto__asignado_a=user)
+        return qs.filter(
+            Q(actividad_entrega__actividad__proyecto__asignado_a=user)
+            | Q(actividad_entrega__actividad__asignado_a=user)
+        ).distinct()
     if FORMULADOR in grupos:
         return qs.filter(actividad_entrega__actividad__asignado_a=user)
     return qs.none()
@@ -90,16 +98,60 @@ def revisiones_visibles(user):
 # Permisos a nivel de objeto (defensa adicional en las vistas de acción)
 # --------------------------------------------------------------------------- #
 def puede_crear_entrega(user, actividad):
-    """El formulador asignado puede entregar si la actividad no está aprobada."""
+    """El ejecutor asignado puede entregar si la actividad no está aprobada."""
     if actividad.estado == Actividades.EstadoActividad.APROBADA:
         return False
     return user.is_superuser or actividad.asignado_a_id == user.id
 
 
+def _ejecutor_es_coordinador(actividad):
+    """El ejecutor de la actividad (asignado_a) pertenece al grupo Coordinador."""
+    return actividad.asignado_a.groups.filter(name=COORDINADOR).exists()
+
+
+def responsable_revision(actividad):
+    """Fuente ÚNICA de verdad de quién revisa las entregas de una actividad.
+
+    - Si el ejecutor es un **coordinador** → revisa el **director** del proyecto
+      (``proyecto.creador_por``).
+    - Si el ejecutor es un **formulador** → revisa el **coordinador** del proyecto
+      (``proyecto.asignado_a``), como en el flujo original.
+    """
+    proyecto = actividad.proyecto
+    if _ejecutor_es_coordinador(actividad):
+        return proyecto.creador_por
+    return proyecto.asignado_a
+
+
 def puede_revisar(user, entrega):
-    """El coordinador del proyecto revisa, si la actividad no está aprobada."""
+    """Revisa quien determine ``responsable_revision``, si la actividad no está
+    aprobada y la entrega aún no tiene revisión."""
     if entrega.actividad.estado == Actividades.EstadoActividad.APROBADA:
         return False
     if hasattr(entrega, "revisiones"):
         return False  # ya tiene revisión (OneToOne)
-    return user.is_superuser or entrega.actividad.proyecto.asignado_a_id == user.id
+    if user.is_superuser:
+        return True
+    return responsable_revision(entrega.actividad).id == user.id
+
+
+def entregas_por_revisar(user):
+    """Entregas sin revisar cuya revisión le corresponde a ``user`` (regla B).
+
+    Une los dos caminos en una sola consulta: ejecutor coordinador → la revisa el
+    director del proyecto; ejecutor formulador → la revisa el coordinador.
+    """
+    ejecutor_coord = Q(actividad__asignado_a__groups__name=COORDINADOR)
+    qs = (
+        ActividadEntrega.objects.select_related(
+            "actividad", "actividad__proyecto", "usuario"
+        )
+        .filter(revisiones__isnull=True)
+        .exclude(actividad__estado=Actividades.EstadoActividad.APROBADA)
+    )
+    if user.is_superuser:
+        return qs.distinct()
+    return qs.filter(
+        (ejecutor_coord & Q(actividad__proyecto__creador_por=user))
+        | (~ejecutor_coord & Q(actividad__proyecto__asignado_a=user))
+    ).distinct()

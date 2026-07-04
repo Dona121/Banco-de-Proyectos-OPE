@@ -285,6 +285,11 @@ class ActividadCreateView(GestionRequeridoMixin, CreateView):
             )
         return super().dispatch(request, *args, **kwargs)
 
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["user"] = self.request.user
+        return kwargs
+
     def form_valid(self, form):
         form.instance.proyecto = self.proyecto
         form.instance.asignado_por = self.request.user
@@ -397,8 +402,10 @@ class EntregaDetailView(LoginRequiredMixin, DetailView):
         ctx["revision"] = getattr(entrega, "revisiones", None) if hasattr(
             entrega, "revisiones"
         ) else None
+        # Documenta el ejecutor (quien hizo la entrega), sea formulador o
+        # coordinador; nunca el revisor.
         ctx["puede_documentar"] = (
-            es_formulador(user) and entrega.usuario_id == user.id
+            entrega.usuario_id == user.id
             and entrega.actividad.estado != Estado.APROBADA
         ) or user.is_superuser
         ctx["puede_revisar"] = selectors.puede_revisar(user, entrega)
@@ -422,7 +429,7 @@ class DocumentoCreateView(LoginRequiredMixin, View):
         )
         permitido = (
             request.user.is_superuser
-            or (es_formulador(request.user) and entrega.usuario_id == request.user.id)
+            or entrega.usuario_id == request.user.id  # el ejecutor de la entrega
         )
         if not permitido or entrega.actividad.estado == Estado.APROBADA:
             raise PermissionDenied()
@@ -441,7 +448,9 @@ class DocumentoCreateView(LoginRequiredMixin, View):
 # Revisiones
 # =========================================================================== #
 class RevisionCreateView(LoginRequiredMixin, View):
-    """El coordinador aprueba o solicita ajustes sobre una entrega."""
+    """Aprueba o solicita ajustes sobre una entrega. Quién revisa lo decide
+    ``selectors.responsable_revision`` (coordinador del proyecto para el trabajo
+    de un formulador; director del proyecto para el de un coordinador)."""
 
     def post(self, request, entrega_pk):
         entrega = get_object_or_404(

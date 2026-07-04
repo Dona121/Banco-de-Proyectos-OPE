@@ -40,35 +40,39 @@
       <!-- 02 Actividades + subactividades -->
       <div class="rounded-lg border border-slate-200 border-l-4 border-l-azul bg-white px-4 py-3 shadow-sm">
         <div class="mb-0.5 flex items-center justify-between">
-          <span class="text-[11px] font-semibold uppercase tracking-wide text-azul">Coordinador</span>
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-azul">Coordinador <span class="text-slate-400">/ Director</span></span>
           <span class="text-[10px] font-bold text-slate-300">PASO 02</span>
         </div>
-        <p class="text-slate-700">Dentro del proyecto crea las actividades, les pone fecha de entrega y se las asigna a un formulador.</p>
-        <p class="mt-1 text-xs text-slate-500">Si una actividad es grande, la divide en subactividades (los pasos más pequeños que la componen).</p>
+        <p class="text-slate-700">Se crean las actividades, con su fecha de entrega, y se asignan a quien las va a realizar.</p>
+        <p class="mt-1 text-xs text-slate-500">El <strong>coordinador</strong> las asigna a formuladores. El <strong>director</strong> también puede asignarlas: a un coordinador o a un formulador. Una actividad grande se divide en subactividades.</p>
       </div>
       {% include 'web/actividades/_flecha.html' %}
 
-      <!-- 03 Entrega del formulador -->
+      <!-- 03 Entrega del responsable -->
       <div class="rounded-lg border border-slate-200 border-l-4 border-l-slate-500 bg-white px-4 py-3 shadow-sm">
         <div class="mb-0.5 flex items-center justify-between">
-          <span class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Formulador</span>
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Responsable · formulador o coordinador</span>
           <span class="text-[10px] font-bold text-slate-300">PASO 03</span>
         </div>
-        <p class="text-slate-700">Realiza la actividad (y sus subactividades) y la entrega junto con los documentos de soporte.</p>
+        <p class="text-slate-700">Quien tiene la actividad asignada la realiza (y sus subactividades) y la entrega junto con los documentos de soporte.</p>
       </div>
       {% include 'web/actividades/_flecha.html' %}
 
-      <!-- Decisión: revisión del coordinador -->
+      <!-- Decisión: quién revisa depende de quién ejecutó -->
       <div class="rounded-lg border border-ambar/50 bg-ambar-light px-4 py-3 shadow-sm">
         <div class="mb-1 flex items-center gap-2">
           <span class="inline-block h-3 w-3 rotate-45 rounded-[2px] bg-ambar"></span>
-          <span class="text-[11px] font-semibold uppercase tracking-wide text-ambar-dark">Decisión · Coordinador</span>
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-ambar-dark">Decisión · Revisión</span>
         </div>
-        <p class="font-semibold text-slate-800">Revisa la entrega del formulador</p>
+        <p class="font-semibold text-slate-800">Revisa la entrega quien corresponde según quién la hizo</p>
+        <div class="mt-2 space-y-1 text-xs text-slate-700">
+          <p>· Si la hizo un <strong>formulador</strong> → la revisa el <strong>coordinador</strong> del proyecto.</p>
+          <p>· Si la hizo un <strong>coordinador</strong> → la revisa el <strong>director</strong>.</p>
+        </div>
         <div class="mt-2 space-y-1.5 text-xs text-slate-700">
           <p><span class="mr-1 rounded-full bg-brand-light px-2 py-0.5 font-medium text-brand-dark">Aprobada</span>la actividad queda terminada.</p>
-          <p><span class="mr-1 rounded-full bg-ambar-light px-2 py-0.5 font-medium text-ambar-dark ring-1 ring-ambar/40">Requiere ajustes</span>vuelve al formulador para corregir.</p>
-          <p><span class="mr-1 rounded-full bg-rojo-light px-2 py-0.5 font-medium text-rojo">Rechazada</span>vuelve al formulador para corregir.</p>
+          <p><span class="mr-1 rounded-full bg-ambar-light px-2 py-0.5 font-medium text-ambar-dark ring-1 ring-ambar/40">Requiere ajustes</span>vuelve a quien la hizo para corregir.</p>
+          <p><span class="mr-1 rounded-full bg-rojo-light px-2 py-0.5 font-medium text-rojo">Rechazada</span>vuelve a quien la hizo para corregir.</p>
         </div>
       </div>
 
@@ -78,14 +82,14 @@
         <span class="text-[11px] font-semibold uppercase tracking-wide">Si piden correcciones</span>
       </div>
       <div class="rounded-lg border border-dashed border-ambar/60 bg-ambar-light px-4 py-3 text-xs text-ambar-dark">
-        Si el coordinador pide ajustes o no la aprueba, el formulador corrige y vuelve a entregar (paso 03). El coordinador revisa de nuevo. Esto se repite hasta que la actividad quede aprobada.
+        Si piden ajustes o no la aprueban, quien hizo la actividad corrige y vuelve a entregar (paso 03). El mismo revisor la revisa de nuevo. Esto se repite hasta que la actividad quede aprobada.
       </div>
       {% include 'web/actividades/_flecha.html' %}
 
       <!-- Fin -->
       <div class="rounded-lg border border-brand/40 bg-brand-light px-4 py-3">
         <span class="text-[11px] font-semibold uppercase tracking-wide text-brand-dark">Fin</span>
-        <p class="font-medium text-brand-dark">Cuando el coordinador aprueba, la actividad queda terminada. El proyecto avanza a medida que se aprueban todas sus actividades.</p>
+        <p class="font-medium text-brand-dark">Cuando el revisor aprueba, la actividad queda terminada. El proyecto avanza a medida que se aprueban todas sus actividades.</p>
       </div>
 
     </div>
