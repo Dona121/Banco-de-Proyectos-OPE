@@ -30,6 +30,7 @@ from cuentas.roles import (
     COORDINADOR,
     DIRECTOR,
     FORMULADOR,
+    es_consulta,
     es_coordinador,
     es_director,
     es_formulador,
@@ -67,6 +68,8 @@ class DashboardView(LoginRequiredMixin, TemplateView):
             return "coordinador"
         if es_formulador(user):
             return "formulador"
+        if es_consulta(user):
+            return "consulta"
         return "generico"
 
     def get_template_names(self):
@@ -80,6 +83,7 @@ class DashboardView(LoginRequiredMixin, TemplateView):
             "director": metrics.director,
             "coordinador": metrics.coordinador,
             "formulador": metrics.formulador,
+            "consulta": metrics.consulta,
         }.get(rol)
         if constructor:
             ctx.update(constructor(self.request.user))

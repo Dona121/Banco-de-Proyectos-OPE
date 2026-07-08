@@ -8,6 +8,8 @@ intervenir, el alcance incluye además las cuentas accionables de su etapa.
 """
 from django.db.models import Q
 
+from cuentas.roles import CONSULTA
+
 from . import services
 from .models import AsignacionRevisor, CuentaEntrega, RevisionCuentaCobro, TramiteFinal
 from .roles import (
@@ -34,6 +36,8 @@ def cuentas_visibles(user):
     if user.is_superuser:
         return qs
     grupos = roles_de(user)
+    if CONSULTA in grupos:
+        return qs  # rol transversal de solo lectura: ve todas las cuentas
     condiciones = Q(pk__in=[])  # vacío por defecto
 
     if CONTRATISTA in grupos:

@@ -4,6 +4,7 @@ Reutilizan la base ``RolRequeridoMixin`` de la app ``cuentas`` (login + 403 por
 rol), parametrizándola con los grupos propios del módulo.
 """
 from cuentas.mixins import RolRequeridoMixin
+from cuentas.roles import CONSULTA
 
 from .roles import CONTRATISTA, RADICACION, REVISOR, SECOP, SUPERVISOR
 
@@ -49,6 +50,7 @@ class TramiteFinalRequeridoMixin(RolRequeridoMixin):
 
 
 class ModuloRequeridoMixin(RolRequeridoMixin):
-    """Cualquier actor del módulo (para vistas de consulta compartidas)."""
+    """Cualquier actor del módulo, más el rol transversal de solo lectura
+    ``Consulta`` (para vistas de consulta compartidas: bandeja y detalle)."""
 
-    roles_permitidos = (CONTRATISTA, SUPERVISOR, REVISOR, RADICACION, SECOP)
+    roles_permitidos = (CONTRATISTA, SUPERVISOR, REVISOR, RADICACION, SECOP, CONSULTA)

@@ -7,6 +7,11 @@ DIRECTOR = "Director"
 COORDINADOR = "Coordinador"
 FORMULADOR = "Formulador"
 
+# Rol transversal de SOLO LECTURA: ve ambos dominios (Proyectos y Cuentas de
+# cobro) pero no puede ejecutar ninguna acción. Es la única excepción a la
+# regla de aislamiento entre dominios; se crea en `contenido.0003`.
+CONSULTA = "Consulta"
+
 ROLES = (DIRECTOR, COORDINADOR, FORMULADOR)
 
 
@@ -33,6 +38,12 @@ def es_formulador(user):
     return user.is_authenticated and (user.is_superuser or FORMULADOR in roles_de(user))
 
 
+def es_consulta(user):
+    """Rol transversal de solo lectura (sin bypass de superusuario: el admin ya
+    ve todo por otras vías)."""
+    return user.is_authenticated and CONSULTA in roles_de(user)
+
+
 def rol_principal(user):
     """Rol "principal" para mostrar en la interfaz (jerarquía Director > Coord > Form)."""
     if not user.is_authenticated:
@@ -43,4 +54,6 @@ def rol_principal(user):
     for rol in ROLES:
         if rol in grupos:
             return rol
+    if CONSULTA in grupos:
+        return "Consulta"
     return "Sin rol"

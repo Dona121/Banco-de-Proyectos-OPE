@@ -102,6 +102,42 @@ class NotificacionesTest(ReglaBBaseTest):
         self.assertTrue(any("realízala y entrégala" in t for t in self._textos(self.coord2)))
 
 
+class ConsultaRolTest(ReglaBBaseTest):
+    """El rol transversal Consulta ve todo el sistema pero no puede actuar."""
+
+    def setUp(self):
+        super().setUp()
+        self.consulta = self._user("consulta", "Consulta")
+
+    def test_ve_proyectos_y_actividades_ajenos(self):
+        act = self._actividad(self.form)
+        self.assertIn(self.proyecto, selectors.proyectos_visibles(self.consulta))
+        self.assertIn(act, selectors.actividades_visibles(self.consulta))
+
+    def test_no_puede_revisar_ni_entregar(self):
+        act, entrega = self._entrega(self.form)
+        self.assertFalse(selectors.puede_revisar(self.consulta, entrega))
+        self.assertFalse(selectors.puede_crear_entrega(self.consulta, act))
+
+    def test_lectura_permitida_en_vistas(self):
+        self.client.force_login(self.consulta)
+        self.assertEqual(self.client.get("/").status_code, 200)  # dashboard consulta
+        self.assertEqual(self.client.get("/proyectos/").status_code, 200)
+        self.assertEqual(
+            self.client.get(f"/proyectos/{self.proyecto.pk}/").status_code, 200
+        )
+
+    def test_accion_denegada_en_vistas(self):
+        self.client.force_login(self.consulta)
+        self.assertEqual(self.client.get("/proyectos/nuevo/").status_code, 403)
+        self.assertEqual(
+            self.client.get(
+                f"/proyectos/{self.proyecto.pk}/actividades/nueva/"
+            ).status_code,
+            403,
+        )
+
+
 class ActividadFormTest(ReglaBBaseTest):
     def test_director_ve_coordinadores_y_formuladores(self):
         qs = ActividadForm(user=self.director).fields["asignado_a"].queryset

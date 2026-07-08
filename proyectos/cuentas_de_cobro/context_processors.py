@@ -1,4 +1,6 @@
 """Expone roles y notificaciones del módulo de cuentas de cobro a las plantillas."""
+from cuentas.roles import es_consulta
+
 from . import services
 from .roles import (
     es_contratista,
@@ -35,10 +37,16 @@ def roles_cuentas_cobro(request):
     if user is None or not user.is_authenticated:
         return {}
     if not usa_modulo(user):
+        # `cc_ver_modulo`: quién ve la navegación del módulo (incluye el rol
+        # transversal de solo lectura Consulta, que no participa del flujo).
         # `cc_rol_principal` se expone siempre (vacío aquí) porque la plantilla lo
         # usa como argumento de filtro `default:`, y un argumento inexistente
         # provoca VariableDoesNotExist al renderizar.
-        return {"cc_usa_modulo": False, "cc_rol_principal": ""}
+        return {
+            "cc_usa_modulo": False,
+            "cc_ver_modulo": es_consulta(user),
+            "cc_rol_principal": "",
+        }
     notificaciones = services.notificaciones_para(user)
     return {
         "cc_es_contratista": es_contratista(user),
@@ -47,6 +55,7 @@ def roles_cuentas_cobro(request):
         "cc_es_radicacion": es_radicacion(user),
         "cc_es_secop": es_secop(user),
         "cc_usa_modulo": True,
+        "cc_ver_modulo": True,
         "cc_rol_principal": _rol_principal_cc(user),
         "cc_notificaciones": notificaciones,
         "cc_notificaciones_total": len(notificaciones),

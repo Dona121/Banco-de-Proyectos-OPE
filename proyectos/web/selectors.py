@@ -6,7 +6,7 @@ Las vistas SIEMPRE deben partir de estas funciones, nunca de ``Model.objects``.
 from django.db.models import Count, Q
 
 from contenido.models import Actividades, ActividadEntrega, Proyectos, Revisiones
-from cuentas.roles import roles_de, DIRECTOR, COORDINADOR, FORMULADOR
+from cuentas.roles import roles_de, CONSULTA, DIRECTOR, COORDINADOR, FORMULADOR
 
 
 # --------------------------------------------------------------------------- #
@@ -19,6 +19,8 @@ def proyectos_visibles(user):
     if user.is_superuser:
         return qs
     grupos = roles_de(user)
+    if CONSULTA in grupos:
+        return qs  # solo lectura: ve todo
     if DIRECTOR in grupos:
         return qs.filter(creador_por=user)
     if COORDINADOR in grupos:
@@ -38,6 +40,8 @@ def actividades_visibles(user):
     if user.is_superuser:
         return qs
     grupos = roles_de(user)
+    if CONSULTA in grupos:
+        return qs  # solo lectura: ve todo
     if DIRECTOR in grupos:
         return qs.filter(proyecto__creador_por=user)
     if COORDINADOR in grupos:
@@ -61,6 +65,8 @@ def entregas_visibles(user):
     if user.is_superuser:
         return qs
     grupos = roles_de(user)
+    if CONSULTA in grupos:
+        return qs  # solo lectura: ve todo
     if DIRECTOR in grupos:
         return qs.filter(actividad__proyecto__creador_por=user)
     if COORDINADOR in grupos:
@@ -82,6 +88,8 @@ def revisiones_visibles(user):
     if user.is_superuser:
         return qs
     grupos = roles_de(user)
+    if CONSULTA in grupos:
+        return qs  # solo lectura: ve todo
     if DIRECTOR in grupos:
         return qs.filter(actividad_entrega__actividad__proyecto__creador_por=user)
     if COORDINADOR in grupos:

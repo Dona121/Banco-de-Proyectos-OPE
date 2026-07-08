@@ -15,7 +15,9 @@ La plataforma tiene **dos aplicaciones independientes**:
 > tiene un rol de Cuentas de cobro solo ve y usa la de Cuentas de cobro. En el
 > menú de la izquierda cada persona ve **únicamente** los módulos de su
 > aplicación, y si intenta entrar a una sección de la otra, el sistema se lo
-> impide. (El administrador del sistema es la única excepción: puede ver todo.)
+> impide. (El administrador del sistema y el rol **Consulta** son las excepciones:
+> ambos ven las dos aplicaciones. La diferencia es que **Consulta solo puede
+> mirar**, no puede realizar ninguna acción.)
 
 ---
 
@@ -291,6 +293,31 @@ tener que estar buscando.
 
 ---
 
+# Rol transversal · Consulta (solo lectura)
+
+**Quién es:** una persona que necesita **ver toda la información del sistema**
+(las dos aplicaciones) sin intervenir en ningún proceso. Por ejemplo, para
+supervisión, seguimiento o auditoría.
+
+**Qué puede hacer (permisos):**
+- Ver **todos** los proyectos, actividades, entregas y revisiones de la
+  aplicación de Proyectos.
+- Ver **todas** las cuentas de cobro y su trámite completo.
+- Consultar los reportes.
+
+**Qué NO puede hacer:**
+- No crea ni edita nada. No asigna, no entrega, no revisa, no aprueba, no carga
+  documentos ni responde trámites. En las pantallas **no le aparecen los botones
+  de acción**, y si intentara ejecutar una acción directamente, el sistema se lo
+  impide.
+- No recibe avisos ni notificaciones (no le toca hacer nada, solo consultar).
+
+**En qué procesos participa:** en ninguno como actor. Es un observador: entra a
+cualquier pantalla de las dos aplicaciones y ve el estado y el detalle, tal como
+está, en modo solo lectura.
+
+---
+
 ## Resumen rápido
 
 | Aplicación | Rol | En una frase |
@@ -303,3 +330,4 @@ tener que estar buscando.
 | Cuentas de cobro | **Supervisor** | Nombra revisores y da la decisión final. |
 | Cuentas de cobro | **Revisores** | Revisan en orden: jurídico, administrativo y técnico. |
 | Cuentas de cobro | **Secop** | Publica la cuenta en SECOP II y se cierra el proceso. |
+| Transversal | **Consulta** | Ve toda la información de las dos aplicaciones en modo solo lectura; no realiza ninguna acción. |

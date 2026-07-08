@@ -191,6 +191,41 @@ def coordinador(user):
 
 
 # --------------------------------------------------------------------------- #
+# Consulta — panel transversal de solo lectura (ambos dominios)
+# --------------------------------------------------------------------------- #
+def consulta(user):
+    """Totales globales de solo lectura. El rol Consulta ve todo pero no actúa;
+    los selectores ya le devuelven el universo completo."""
+    ahora = timezone.now()
+    proyectos = selectors.proyectos_visibles(user)
+    actividades = selectors.actividades_visibles(user)
+    segmentos, total_act = _distribucion_estado(actividades)
+    proximas, vencidas = _proximas_y_vencidas(actividades, ahora)
+
+    # Cuentas de cobro: import diferido para no acoplar los dominios al importar
+    # (Consulta es la única vista que cruza ambos).
+    from cuentas_de_cobro import selectors as cc_selectors
+
+    cuentas = cc_selectors.cuentas_visibles(user)
+    total_cuentas = cuentas.count()
+    cuentas_abiertas = cuentas.filter(fecha_cierre__isnull=True).count()
+
+    return {
+        "rol_dashboard": "Consulta",
+        "total_proyectos": proyectos.count(),
+        "total_actividades": total_act,
+        "vencidas_count": vencidas.count(),
+        "total_cuentas": total_cuentas,
+        "cuentas_abiertas": cuentas_abiertas,
+        "cuentas_cerradas": total_cuentas - cuentas_abiertas,
+        "segmentos": segmentos,
+        "proyectos": proyectos.order_by("-fecha_creacion")[:6],
+        "proximas": proximas[:6],
+        "vencidas": vencidas.order_by("fecha_vencimiento")[:6],
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Formulador — vista personal
 # --------------------------------------------------------------------------- #
 def formulador(user):
