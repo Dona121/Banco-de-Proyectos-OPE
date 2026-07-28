@@ -393,9 +393,9 @@ class AsignacionRevisor(Fechas):
 class RevisionCuentaCobro(Fechas):
     """Revisión de un rol sobre una entrega.
 
-    Se crea una instancia por rol (jurídico, administrativo, técnico), enganchada
-    a la asignación activa correspondiente. El orden de revisión jurídico →
-    administrativo → técnico se gobierna en la capa de servicios.
+    Se crea una instancia por rol (técnico, jurídico, administrativo), enganchada
+    a la asignación activa correspondiente. El orden de revisión técnico →
+    jurídico → administrativo se gobierna en la capa de servicios.
     """
 
     class ResultadoRevision(models.TextChoices):

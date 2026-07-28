@@ -17,12 +17,20 @@
         {{ actividad.proyecto.nombre }}
       </a>
     </div>
-    {% if puede_entregar %}
-    <a href="{% url 'web:entrega_nueva' actividad.pk %}" class="btn btn-primary">
-      <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
-      Nueva entrega
-    </a>
-    {% endif %}
+    <div class="flex items-center gap-2">
+      {% if puede_editar %}
+      <a href="{% url 'web:actividad_editar' actividad.pk %}" class="btn btn-outline">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125"/></svg>
+        Editar
+      </a>
+      {% endif %}
+      {% if puede_entregar %}
+      <a href="{% url 'web:entrega_nueva' actividad.pk %}" class="btn btn-primary">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+        Nueva entrega
+      </a>
+      {% endif %}
+    </div>
   </div>
 </div>
 

@@ -18,6 +18,7 @@ urlpatterns = [
     # Actividades
     path("actividades/", views.ActividadListView.as_view(), name="actividades"),
     path("actividades/<int:pk>/", views.ActividadDetailView.as_view(), name="actividad_detalle"),
+    path("actividades/<int:pk>/editar/", views.ActividadUpdateView.as_view(), name="actividad_editar"),
     path("actividades/<int:actividad_pk>/subactividades/nueva/",
          views.SubactividadCreateView.as_view(), name="subactividad_nueva"),
     path("actividades/<int:actividad_pk>/entregas/nueva/",

@@ -41,11 +41,13 @@ from .roles import (
     es_supervisor,
 )
 
-# Orden estricto del gating de revisión.
+# Orden estricto del gating de revisión: técnico → jurídico → administrativo.
+# (El técnico va primero porque es quien suele pedir más ajustes; así una
+# devolución reinicia el ciclo desde él y ahorra revisiones repetidas.)
 SECUENCIA_ROLES = [
+    RevisionCuentaCobro.Rol.TECNICO,
     RevisionCuentaCobro.Rol.JURIDICO,
     RevisionCuentaCobro.Rol.ADMINISTRATIVO,
-    RevisionCuentaCobro.Rol.TECNICO,
 ]
 
 # Orden estricto de los trámites finales.
@@ -388,7 +390,7 @@ def reasignar(cuenta, rol, nuevo_revisor, supervisor):
 
 
 # --------------------------------------------------------------------------- #
-# 3. Revisión secuencial (gating jurídico → administrativo → técnico)
+# 3. Revisión secuencial (gating técnico → jurídico → administrativo)
 # --------------------------------------------------------------------------- #
 def _roles_aprobados(entrega):
     return {
@@ -418,7 +420,7 @@ def registrar_revision(asignacion, resultado, comentario):
     - Aprobado → habilita el siguiente rol; si los tres aprobaron, dispara
       ``actualizar_estado`` (estado_revisores = Aprobada).
     - Requiere ajustes / Rechazado → devuelve al contratista: el sistema genera
-      una nueva versión vacía (reinicio total desde el jurídico).
+      una nueva versión vacía (reinicio total desde el primer rol: el técnico).
     """
     cuenta = _lock(asignacion.cuenta_entrega)
     Resultado = RevisionCuentaCobro.ResultadoRevision
@@ -785,7 +787,7 @@ def flujo_de_cuenta(cuenta):
         e4 = ACTUAL
     else:
         det4, e4 = "", FUTURA
-    etapas.append(_etapa("revision", "Revisión (jurídico → administrativo → técnico)", e4, det4))
+    etapas.append(_etapa("revision", "Revisión (técnico → jurídico → administrativo)", e4, det4))
 
     # 5. Decisión del supervisor
     if cuenta.estado_supervisor == AP:

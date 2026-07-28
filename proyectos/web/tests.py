@@ -3,14 +3,21 @@ coordinador; el coordinador del proyecto revisa lo que ejecuta un formulador."""
 from datetime import timedelta
 
 from django.contrib.auth.models import Group, User
-from django.test import TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from contenido.models import Actividades, Proyectos
+from contenido.models import Actividades, Proyectos, Revisiones
 from web import selectors, services
 from web.forms import ActividadForm
 
 Estado = Actividades.EstadoActividad
+
+# Storage en memoria para no subir archivos al S3 real durante los tests.
+_STORAGES_TEST = {
+    "default": {"BACKEND": "django.core.files.storage.InMemoryStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+}
 
 
 class ReglaBBaseTest(TestCase):
@@ -150,3 +157,241 @@ class ActividadFormTest(ReglaBBaseTest):
         self.assertIn(self.form.id, ids)
         self.assertNotIn(self.coord.id, ids)
         self.assertNotIn(self.coord2.id, ids)
+
+
+class DashboardRenderTest(ReglaBBaseTest):
+    """Cada rol carga su dashboard (200 + plantilla correcta). Ejercita
+    ``DashboardView`` y todas las funciones de ``metrics``."""
+
+    def _dashboard(self, user, template):
+        self.client.force_login(user)
+        resp = self.client.get("/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTemplateUsed(resp, template)
+
+    def test_dashboard_director(self):
+        self._actividad(self.form)
+        self._dashboard(self.director, "web/dashboard/director.html")
+
+    def test_dashboard_coordinador(self):
+        self._actividad(self.form)
+        self._dashboard(self.coord, "web/dashboard/coordinador.html")
+
+    def test_dashboard_formulador(self):
+        self._actividad(self.form)
+        self._dashboard(self.form, "web/dashboard/formulador.html")
+
+    def test_dashboard_consulta(self):
+        consulta = self._user("cons", "Consulta")
+        self._dashboard(consulta, "web/dashboard/consulta.html")
+
+    def test_dashboard_generico_sin_rol(self):
+        sin_rol = User.objects.create_user("sinrol", password="x")
+        self._dashboard(sin_rol, "web/dashboard/generico.html")
+
+
+class ProyectosVisiblesScopeTest(ReglaBBaseTest):
+    """Alcance de ``proyectos_visibles`` por rol: cada quien ve solo lo suyo."""
+
+    def test_director_ve_solo_los_que_creo(self):
+        otro_dir = self._user("dir2", "Director")
+        ajeno = Proyectos.objects.create(
+            nombre="Ajeno", creador_por=otro_dir, asignado_a=self.coord
+        )
+        vis = selectors.proyectos_visibles(self.director)
+        self.assertIn(self.proyecto, vis)
+        self.assertNotIn(ajeno, vis)
+
+    def test_coordinador_ve_los_asignados(self):
+        otro_coord = self._user("coordX", "Coordinador")
+        ajeno = Proyectos.objects.create(
+            nombre="Ajeno", creador_por=self.director, asignado_a=otro_coord
+        )
+        vis = selectors.proyectos_visibles(self.coord)
+        self.assertIn(self.proyecto, vis)   # asignado_a = coord
+        self.assertNotIn(ajeno, vis)
+
+    def test_formulador_ve_donde_tiene_actividad(self):
+        self.assertNotIn(self.proyecto, selectors.proyectos_visibles(self.form))
+        self._actividad(self.form)
+        self.assertIn(self.proyecto, selectors.proyectos_visibles(self.form))
+
+
+@override_settings(STORAGES=_STORAGES_TEST)
+class FlujoProyectosVistasTest(ReglaBBaseTest):
+    """Recorre por HTTP las vistas de acción del flujo de proyectos:
+    crear proyecto → crear actividad → entregar → adjuntar documento → revisar."""
+
+    def test_director_crea_proyecto(self):
+        self.client.force_login(self.director)
+        resp = self.client.post(
+            "/proyectos/nuevo/", {"nombre": "Proyecto X", "asignado_a": self.coord.id}
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(
+            Proyectos.objects.filter(nombre="Proyecto X", creador_por=self.director).exists()
+        )
+
+    def test_formulador_no_crea_proyecto(self):
+        self.client.force_login(self.form)
+        self.assertEqual(self.client.get("/proyectos/nuevo/").status_code, 403)
+
+    def test_flujo_actividad_entrega_documento_revision(self):
+        # 1. Director crea y asigna una actividad al formulador.
+        self.client.force_login(self.director)
+        ahora = timezone.now().replace(second=0, microsecond=0)
+        resp = self.client.post(
+            f"/proyectos/{self.proyecto.pk}/actividades/nueva/",
+            {
+                "nombre": "Actividad flujo",
+                "fecha_programada": ahora.strftime("%Y-%m-%dT%H:%M"),
+                "fecha_vencimiento": (ahora + timedelta(days=5)).strftime("%Y-%m-%dT%H:%M"),
+                "asignado_a": self.form.id,
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        act = Actividades.objects.get(nombre="Actividad flujo")
+        self.assertEqual(act.asignado_por, self.director)
+        self.assertEqual(act.estado, Estado.PENDIENTE)
+
+        # 2. El formulador entrega → la actividad queda En revisión.
+        self.client.force_login(self.form)
+        resp = self.client.post(
+            f"/actividades/{act.pk}/entregas/nueva/", {"comentario": "v1"}
+        )
+        self.assertEqual(resp.status_code, 302)
+        act.refresh_from_db()
+        self.assertEqual(act.estado, Estado.EN_REVISION)
+        entrega = act.actividadentrega_set.get()
+
+        # 3. El formulador adjunta un documento (usa InMemoryStorage).
+        resp = self.client.post(
+            f"/entregas/{entrega.pk}/documentos/nuevo/",
+            {
+                "nombre": "Soporte",
+                "archivo": SimpleUploadedFile("s.pdf", b"x", content_type="application/pdf"),
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(entrega.documentos_set.count(), 1)
+
+        # 4. El coordinador del proyecto revisa y aprueba → actividad Aprobada.
+        self.client.force_login(self.coord)
+        resp = self.client.post(
+            f"/entregas/{entrega.pk}/revisar/",
+            {"resultado": Revisiones.ResultadoRevision.APROBADA, "comentario": "ok"},
+        )
+        self.assertEqual(resp.status_code, 302)
+        act.refresh_from_db()
+        self.assertEqual(act.estado, Estado.APROBADA)
+
+    def test_formulador_no_puede_revisar(self):
+        _, entrega = self._entrega(self.form)
+        self.client.force_login(self.form)
+        resp = self.client.post(
+            f"/entregas/{entrega.pk}/revisar/",
+            {"resultado": Revisiones.ResultadoRevision.APROBADA, "comentario": "x"},
+        )
+        self.assertEqual(resp.status_code, 403)
+
+
+class ReportesTest(ReglaBBaseTest):
+    """Página de reportes y descargas (Excel / PDF) responden correctamente."""
+
+    def test_index_render(self):
+        self.client.force_login(self.director)
+        self.assertEqual(self.client.get("/reportes/").status_code, 200)
+
+    def test_excel_proyectos_formulados(self):
+        self._actividad(self.form)
+        self.client.force_login(self.director)
+        resp = self.client.get("/reportes/proyectos-formulados.xlsx")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("spreadsheetml", resp["Content-Type"])
+
+    def test_pdf_avance_por_proyecto(self):
+        self._actividad(self.form)
+        self.client.force_login(self.director)
+        resp = self.client.get("/reportes/avance-por-proyecto.pdf")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "application/pdf")
+
+
+class ActividadEditTest(ReglaBBaseTest):
+    """Editar nombre/fechas de una actividad: solo el director o el coordinador
+    que la creó (identificado por ``asignado_por``)."""
+
+    def _act_creada_por(self, creador, asignado_a=None):
+        ahora = timezone.now()
+        return Actividades.objects.create(
+            proyecto=self.proyecto, nombre="orig",
+            fecha_programada=ahora, fecha_vencimiento=ahora + timedelta(days=7),
+            estado=Estado.PENDIENTE, asignado_por=creador,
+            asignado_a=asignado_a or self.form,
+        )
+
+    def test_creador_puede_editar(self):
+        act_dir = self._act_creada_por(self.director)
+        act_coord = self._act_creada_por(self.coord)
+        self.assertTrue(selectors.puede_editar_actividad(self.director, act_dir))
+        self.assertTrue(selectors.puede_editar_actividad(self.coord, act_coord))
+
+    def test_actividad_aprobada_no_se_puede_editar(self):
+        # Ni siquiera su creador puede editar una actividad ya aprobada.
+        act = self._act_creada_por(self.director)
+        act.estado = Estado.APROBADA
+        act.save(update_fields=["estado"])
+        self.assertFalse(selectors.puede_editar_actividad(self.director, act))
+        self.client.force_login(self.director)
+        self.assertEqual(self.client.get(f"/actividades/{act.pk}/editar/").status_code, 403)
+
+    def test_no_creador_no_puede_editar(self):
+        act_dir = self._act_creada_por(self.director)
+        # El coordinador del proyecto, si no la creó, no puede editarla.
+        self.assertFalse(selectors.puede_editar_actividad(self.coord, act_dir))
+        # Un formulador nunca puede editar.
+        self.assertFalse(selectors.puede_editar_actividad(self.form, act_dir))
+
+    def test_post_actualiza_nombre_y_fechas(self):
+        act = self._act_creada_por(self.director)
+        self.client.force_login(self.director)
+        ahora = timezone.now().replace(second=0, microsecond=0)
+        resp = self.client.post(
+            f"/actividades/{act.pk}/editar/",
+            {
+                "nombre": "nuevo nombre",
+                "fecha_programada": ahora.strftime("%Y-%m-%dT%H:%M"),
+                "fecha_vencimiento": (ahora + timedelta(days=3)).strftime("%Y-%m-%dT%H:%M"),
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        act.refresh_from_db()
+        self.assertEqual(act.nombre, "nuevo nombre")
+
+    def test_no_creador_recibe_403(self):
+        # La actividad la creó el director; es visible para el coordinador del
+        # proyecto, pero no la creó él → 403 (no 404).
+        act = self._act_creada_por(self.director)
+        self.client.force_login(self.coord)
+        self.assertEqual(self.client.get(f"/actividades/{act.pk}/editar/").status_code, 403)
+
+    def test_formulador_recibe_403(self):
+        act = self._act_creada_por(self.director)
+        self.client.force_login(self.form)
+        self.assertEqual(self.client.get(f"/actividades/{act.pk}/editar/").status_code, 403)
+
+    def test_fecha_invalida_no_guarda(self):
+        act = self._act_creada_por(self.director)
+        self.client.force_login(self.director)
+        ahora = timezone.now().replace(second=0, microsecond=0)
+        resp = self.client.post(
+            f"/actividades/{act.pk}/editar/",
+            {
+                "nombre": "no debe guardar",
+                "fecha_programada": (ahora + timedelta(days=5)).strftime("%Y-%m-%dT%H:%M"),
+                "fecha_vencimiento": ahora.strftime("%Y-%m-%dT%H:%M"),
+            },
+        )
+        self.assertEqual(resp.status_code, 200)  # re-render con error de validación
+        act.refresh_from_db()
+        self.assertEqual(act.nombre, "orig")

@@ -112,6 +112,25 @@ def puede_crear_entrega(user, actividad):
     return user.is_superuser or actividad.asignado_a_id == user.id
 
 
+def puede_editar_actividad(user, actividad):
+    """Solo el director o el coordinador que **creó** la actividad puede editar su
+    nombre y fechas. El creador queda registrado en ``asignado_por``.
+
+    Un formulador nunca crea actividades, así que la comprobación por
+    ``asignado_por`` ya lo excluye; el chequeo de rol es defensa explícita.
+
+    Una actividad **aprobada** ya no se puede editar (ni por su creador).
+    """
+    if actividad.estado == Actividades.EstadoActividad.APROBADA:
+        return False
+    if user.is_superuser:
+        return True
+    grupos = roles_de(user)
+    if DIRECTOR not in grupos and COORDINADOR not in grupos:
+        return False
+    return actividad.asignado_por_id == user.id
+
+
 def _ejecutor_es_coordinador(actividad):
     """El ejecutor de la actividad (asignado_a) pertenece al grupo Coordinador."""
     return actividad.asignado_a.groups.filter(name=COORDINADOR).exists()

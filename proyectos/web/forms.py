@@ -54,7 +54,7 @@ class ProyectoForm(EstilizadoMixin, forms.ModelForm):
     class Meta:
         model = Proyectos
         fields = ("nombre", "asignado_a")
-        widgets = {"nombre": forms.TextInput()}
+        widgets = {"nombre": forms.Textarea(attrs={"rows": 2})}
         labels = {"asignado_a": "Coordinador asignado"}
 
     def __init__(self, *args, **kwargs):
@@ -84,6 +84,28 @@ class ActividadForm(EstilizadoMixin, forms.ModelForm):
             self.fields["asignado_a"].label = "Responsable asignado"
         else:
             self.fields["asignado_a"].queryset = _usuarios_de(FORMULADOR)
+        for nombre in ("fecha_programada", "fecha_vencimiento"):
+            self.fields[nombre].input_formats = ["%Y-%m-%dT%H:%M"]
+
+
+class ActividadEditForm(EstilizadoMixin, forms.ModelForm):
+    """Edición de una actividad ya creada: solo nombre y fechas.
+
+    El ejecutor (`asignado_a`), el estado y la asignación no se tocan aquí para
+    no alterar el flujo de entregas/revisiones ya en curso.
+    """
+
+    class Meta:
+        model = Actividades
+        fields = ("nombre", "fecha_programada", "fecha_vencimiento")
+        widgets = {
+            "nombre": forms.TextInput(),
+            "fecha_programada": DateTimeLocalInput(),
+            "fecha_vencimiento": DateTimeLocalInput(),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         for nombre in ("fecha_programada", "fecha_vencimiento"):
             self.fields[nombre].input_formats = ["%Y-%m-%dT%H:%M"]
 

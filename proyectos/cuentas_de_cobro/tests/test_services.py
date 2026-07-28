@@ -77,9 +77,10 @@ class FlujoBaseTest(TestCase):
 
     def _aprobar_revisores(self, cuenta):
         a_ju, a_ad, a_te = self._asignar_todos(cuenta)
+        # Nuevo orden del gating: técnico → jurídico → administrativo.
+        services.registrar_revision(a_te, ResRev.APROBADA, "ok")
         services.registrar_revision(a_ju, ResRev.APROBADA, "ok")
         services.registrar_revision(a_ad, ResRev.APROBADA, "ok")
-        services.registrar_revision(a_te, ResRev.APROBADA, "ok")
         return a_ju, a_ad, a_te
 
 
@@ -130,22 +131,25 @@ class CaminoFelizTest(FlujoBaseTest):
 
 
 class GatingTest(FlujoBaseTest):
-    def test_tecnica_no_arranca_sin_administrativa(self):
+    def test_juridica_no_arranca_sin_tecnica(self):
         cuenta = self._radicar(self._cuenta_con_documentos())
         a_ju, a_ad, a_te = self._asignar_todos(cuenta)
 
-        services.registrar_revision(a_ju, ResRev.APROBADA, "ok")
+        # El técnico va primero; el jurídico no puede arrancar antes de él.
         with self.assertRaises(ValidationError):
-            services.registrar_revision(a_te, ResRev.APROBADA, "ok")
+            services.registrar_revision(a_ju, ResRev.APROBADA, "ok")
 
-        services.registrar_revision(a_ad, ResRev.APROBADA, "ok")
         services.registrar_revision(a_te, ResRev.APROBADA, "ok")
+        services.registrar_revision(a_ju, ResRev.APROBADA, "ok")
+        services.registrar_revision(a_ad, ResRev.APROBADA, "ok")
         cuenta.refresh_from_db()
         self.assertEqual(cuenta.estado_revisores, ResRad.APROBADA)
 
-    def test_administrativa_no_arranca_sin_juridica(self):
+    def test_administrativa_va_de_ultima(self):
         cuenta = self._radicar(self._cuenta_con_documentos())
-        _, a_ad, _ = self._asignar_todos(cuenta)
+        a_ju, a_ad, a_te = self._asignar_todos(cuenta)
+        services.registrar_revision(a_te, ResRev.APROBADA, "ok")
+        # Aún falta la jurídica: la administrativa (última) no puede arrancar.
         with self.assertRaises(ValidationError):
             services.registrar_revision(a_ad, ResRev.APROBADA, "ok")
 
@@ -153,16 +157,17 @@ class GatingTest(FlujoBaseTest):
 class DeclinacionReasignacionTest(FlujoBaseTest):
     def test_declinar_y_reasignar(self):
         cuenta = self._radicar(self._cuenta_con_documentos())
-        a_ju = services.asignar_revisor(cuenta, Rol.JURIDICO, self.rev_ju, self.supervisor)
+        # El técnico es el primero en turno, así que puede revisar sin depender de otro.
+        a_te = services.asignar_revisor(cuenta, Rol.TECNICO, self.rev_te, self.supervisor)
 
-        services.declinar_asignacion(a_ju, "vacaciones")
-        a_ju.refresh_from_db()
-        self.assertEqual(a_ju.estado, AsignacionRevisor.Estado.DECLINADA)
+        services.declinar_asignacion(a_te, "vacaciones")
+        a_te.refresh_from_db()
+        self.assertEqual(a_te.estado, AsignacionRevisor.Estado.DECLINADA)
 
         with self.assertRaises(ValidationError):
-            services.registrar_revision(a_ju, ResRev.APROBADA, "ok")
+            services.registrar_revision(a_te, ResRev.APROBADA, "ok")
 
-        nueva = services.reasignar(cuenta, Rol.JURIDICO, self.rev_ad, self.supervisor)
+        nueva = services.reasignar(cuenta, Rol.TECNICO, self.rev_ad, self.supervisor)
         self.assertEqual(nueva.estado, AsignacionRevisor.Estado.ACTIVA)
         services.registrar_revision(nueva, ResRev.APROBADA, "ok")
         self.assertEqual(
@@ -204,19 +209,19 @@ class RechazoSupervisorTest(FlujoBaseTest):
 class RevisionAprobacionSegunDocsTest(FlujoBaseTest):
     def test_no_aprueba_revision_con_documento_sin_resolver(self):
         cuenta = self._radicar(self._cuenta_con_documentos())
-        a_ju, _, _ = self._asignar_todos(cuenta)
+        _, _, a_te = self._asignar_todos(cuenta)
         entrega = services.ultima_entrega(cuenta)
         doc = entrega.documentoscuentacobro_set.first()
         Estado = DocumentosCuentaCobro.EstadoDocumento
-        # El jurídico marca un documento como rechazado: no puede aprobar la revisión.
+        # El técnico (primero en turno) marca un documento rechazado: no puede aprobar.
         services.revisar_documento(doc, Estado.RECHAZADO, "corrige")
         with self.assertRaises(ValidationError):
-            services.registrar_revision(a_ju, ResRev.APROBADA, "ok")
+            services.registrar_revision(a_te, ResRev.APROBADA, "ok")
         # Lo resuelve como "No aplica" → ahora todos están AP/NA y sí puede aprobar.
         services.revisar_documento(doc, Estado.NO_APLICA, "no aplica")
-        services.registrar_revision(a_ju, ResRev.APROBADA, "ok")
+        services.registrar_revision(a_te, ResRev.APROBADA, "ok")
         self.assertTrue(
-            entrega.revisioncuentacobro_set.filter(rol=Rol.JURIDICO).exists()
+            entrega.revisioncuentacobro_set.filter(rol=Rol.TECNICO).exists()
         )
 
 
@@ -224,8 +229,8 @@ class MarcadoDocumentosTest(FlujoBaseTest):
     def test_revisor_de_turno_marca_documentos_observados(self):
         cuenta = self._radicar(self._cuenta_con_documentos())
         self._asignar_todos(cuenta)
-        self.assertTrue(selectors.puede_marcar_documentos(self.rev_ju, cuenta))
-        self.assertFalse(selectors.puede_marcar_documentos(self.rev_ad, cuenta))
+        self.assertTrue(selectors.puede_marcar_documentos(self.rev_te, cuenta))
+        self.assertFalse(selectors.puede_marcar_documentos(self.rev_ju, cuenta))
 
         doc = services.ultima_entrega(cuenta).documentoscuentacobro_set.first()
         services.revisar_documento(doc, doc.EstadoDocumento.RECHAZADO, "corrige esto")
@@ -235,29 +240,28 @@ class MarcadoDocumentosTest(FlujoBaseTest):
 
 
 class ReinicioTotalTest(FlujoBaseTest):
-    def test_devolucion_genera_version_vacia_reinicia_en_juridico(self):
+    def test_devolucion_genera_version_vacia_reinicia_en_tecnico(self):
         cuenta = self._radicar(self._cuenta_con_documentos())
-        a_ju, _, _ = self._asignar_todos(cuenta)
-        # Devolución del jurídico → el sistema genera versión nueva automáticamente.
-        services.registrar_revision(a_ju, ResRev.AJUSTES, "corrige")
+        _, _, a_te = self._asignar_todos(cuenta)
+        # Devolución del técnico (primero) → el sistema genera versión nueva automáticamente.
+        services.registrar_revision(a_te, ResRev.AJUSTES, "corrige")
 
         entrega2 = services.ultima_entrega(cuenta)
         self.assertEqual(entrega2.numero_version, 2)
         self.assertEqual(entrega2.revisioncuentacobro_set.count(), 0)
-        self.assertTrue(services.rol_habilitado(entrega2, Rol.JURIDICO))
-        self.assertFalse(services.rol_habilitado(entrega2, Rol.ADMINISTRATIVO))
+        self.assertTrue(services.rol_habilitado(entrega2, Rol.TECNICO))
+        self.assertFalse(services.rol_habilitado(entrega2, Rol.JURIDICO))
 
-    def test_ajustes_en_administrativo_reinicia_desde_juridico(self):
+    def test_ajustes_en_juridico_reinicia_desde_tecnico(self):
         cuenta = self._radicar(self._cuenta_con_documentos())
         a_ju, a_ad, a_te = self._asignar_todos(cuenta)
-        services.registrar_revision(a_ju, ResRev.APROBADA, "ok")
-        services.registrar_revision(a_ad, ResRev.AJUSTES, "corrige")
+        services.registrar_revision(a_te, ResRev.APROBADA, "ok")
+        services.registrar_revision(a_ju, ResRev.AJUSTES, "corrige")
 
         entrega2 = services.ultima_entrega(cuenta)
         self.assertEqual(entrega2.revisioncuentacobro_set.count(), 0)
-        self.assertTrue(services.rol_habilitado(entrega2, Rol.JURIDICO))
-        self.assertFalse(services.rol_habilitado(entrega2, Rol.ADMINISTRATIVO))
-        self.assertFalse(services.rol_habilitado(entrega2, Rol.TECNICO))
+        self.assertTrue(services.rol_habilitado(entrega2, Rol.TECNICO))
+        self.assertFalse(services.rol_habilitado(entrega2, Rol.JURIDICO))
 
 
 class TramitesFinalesTest(FlujoBaseTest):
@@ -333,12 +337,59 @@ class TramitesFinalesTest(FlujoBaseTest):
 class TrazabilidadTest(FlujoBaseTest):
     def test_eventos_y_marca_de_devolucion(self):
         cuenta = self._radicar(self._cuenta_con_documentos())
-        a_ju, _, _ = self._asignar_todos(cuenta)
-        services.registrar_revision(a_ju, ResRev.AJUSTES, "corrige")
+        _, _, a_te = self._asignar_todos(cuenta)
+        services.registrar_revision(a_te, ResRev.AJUSTES, "corrige")
 
         eventos = list(cuenta.eventos.values_list("evento", flat=True))
         self.assertIn(services.Eventos.ENVIADO, eventos)
         self.assertIn(services.Eventos.RAD_APROBADA, eventos)
         self.assertIn(services.Eventos.NUEVA_VERSION, eventos)
-        self.assertTrue(services.es_devolucion(services.Eventos.devolucion_de_revisor(Rol.JURIDICO)))
+        self.assertTrue(services.es_devolucion(services.Eventos.devolucion_de_revisor(Rol.TECNICO)))
+
+
+class NotificacionesCuentasTest(FlujoBaseTest):
+    """Notificaciones derivadas (sin modelo) que calcula ``notificaciones_para``."""
+
+    def _textos(self, user):
+        return [n["texto"] for n in services.notificaciones_para(user)]
+
+    def test_contratista_pendiente_de_entregar(self):
+        self._cuenta_con_documentos()  # v1, aún sin "Entregar"
+        self.assertTrue(
+            any("entrega tus documentos" in t for t in self._textos(self.contratista))
+        )
+
+    def test_revisor_en_turno_recibe_pendiente(self):
+        cuenta = self._radicar(self._cuenta_con_documentos())
+        self._asignar_todos(cuenta)
+        # El técnico va primero: le llega la notificación; al jurídico aún no.
+        self.assertTrue(any("revisión pendiente" in t for t in self._textos(self.rev_te)))
+        self.assertFalse(any("revisión pendiente" in t for t in self._textos(self.rev_ju)))
+
+    def test_supervisor_espera_decision_final(self):
+        cuenta = self._radicar(self._cuenta_con_documentos())
+        self._aprobar_revisores(cuenta)
+        self.assertTrue(any("decisión final" in t for t in self._textos(self.supervisor)))
+
+
+class CuentasVisiblesScopeTest(FlujoBaseTest):
+    """Alcance de ``cuentas_visibles``: cada rol ve solo lo que le corresponde."""
+
+    def test_contratista_ve_solo_las_suyas(self):
+        cuenta = self._cuenta_con_documentos()
+        otro = User.objects.create_user("contra2", password="x")
+        otro.groups.add(Group.objects.get(name="Contratista"))
+        self.assertIn(cuenta, selectors.cuentas_visibles(self.contratista))
+        self.assertEqual(list(selectors.cuentas_visibles(otro)), [])
+
+    def test_revisor_ve_solo_donde_esta_asignado(self):
+        cuenta = self._radicar(self._cuenta_con_documentos())
+        self.assertNotIn(cuenta, selectors.cuentas_visibles(self.rev_te))
+        self._asignar_todos(cuenta)
+        self.assertIn(cuenta, selectors.cuentas_visibles(self.rev_te))
+
+    def test_usuario_sin_rol_no_ve_nada(self):
+        self._cuenta_con_documentos()
+        sin_rol = User.objects.create_user("nadie", password="x")
+        self.assertEqual(list(selectors.cuentas_visibles(sin_rol)), [])
         self.assertFalse(services.es_devolucion(services.Eventos.RAD_APROBADA))

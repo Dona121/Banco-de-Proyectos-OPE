@@ -19,10 +19,10 @@
       {% include 'components/form_field.html' with field=form.fecha_programada %}
       {% include 'components/form_field.html' with field=form.fecha_vencimiento %}
     </div>
-    {% include 'components/form_field.html' with field=form.asignado_a %}
+    {% if form.asignado_a %}{% include 'components/form_field.html' with field=form.asignado_a %}{% endif %}
     <div class="flex gap-3 pt-2">
-      <button type="submit" class="btn btn-primary">Crear actividad</button>
-      <a href="{% url 'web:proyecto_detalle' proyecto.pk %}" class="btn btn-outline">Cancelar</a>
+      <button type="submit" class="btn btn-primary">{{ boton|default:"Guardar" }}</button>
+      <a href="{{ cancelar_url }}" class="btn btn-outline">Cancelar</a>
     </div>
   </form>
 </div>

@@ -42,6 +42,7 @@ from .reports import pdf as report_pdf
 from .reports import queries as report_queries
 from .reports.forms import ReporteAvanceForm, ReporteFormuladosForm
 from .forms import (
+    ActividadEditForm,
     ActividadForm,
     DocumentoForm,
     EntregaForm,
@@ -254,6 +255,7 @@ class ActividadDetailView(LoginRequiredMixin, DetailView):
         ctx["puede_gestionar"] = (
             es_coordinador(user) and actividad.proyecto.asignado_a_id == user.id
         ) or user.is_superuser
+        ctx["puede_editar"] = selectors.puede_editar_actividad(user, actividad)
         ctx["subactividad_form"] = SubactividadForm()
         ctx["breadcrumbs"] = [
             ("Proyectos", reverse("web:proyectos")),
@@ -313,11 +315,57 @@ class ActividadCreateView(GestionRequeridoMixin, CreateView):
         ctx = super().get_context_data(**kwargs)
         ctx["titulo"] = "Nueva actividad"
         ctx["proyecto"] = self.proyecto
+        ctx["boton"] = "Crear actividad"
+        ctx["cancelar_url"] = reverse("web:proyecto_detalle", args=[self.proyecto.pk])
         ctx["breadcrumbs"] = [
             ("Proyectos", reverse("web:proyectos")),
             (self.proyecto.nombre,
              reverse("web:proyecto_detalle", args=[self.proyecto.pk])),
             ("Nueva actividad", None),
+        ]
+        return ctx
+
+
+class ActividadUpdateView(GestionRequeridoMixin, UpdateView):
+    """Editar el nombre y las fechas de una actividad.
+
+    Solo el director o el coordinador que la creó (``asignado_por``). No cambia el
+    ejecutor ni el estado, así que no altera el flujo de entregas/revisiones.
+    """
+
+    template_name = "web/actividades/form.html"
+    form_class = ActividadEditForm
+    roles_permitidos = (DIRECTOR, COORDINADOR)
+
+    def get_queryset(self):
+        return selectors.actividades_visibles(self.request.user)
+
+    def get_object(self, queryset=None):
+        obj = super().get_object(queryset)
+        if not selectors.puede_editar_actividad(self.request.user, obj):
+            raise PermissionDenied("Solo quien creó la actividad puede editarla.")
+        return obj
+
+    def form_valid(self, form):
+        messages.success(self.request, "Actividad actualizada.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse("web:actividad_detalle", args=[self.object.pk])
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx["titulo"] = "Editar actividad"
+        ctx["proyecto"] = self.object.proyecto
+        ctx["boton"] = "Guardar cambios"
+        ctx["cancelar_url"] = reverse("web:actividad_detalle", args=[self.object.pk])
+        ctx["breadcrumbs"] = [
+            ("Proyectos", reverse("web:proyectos")),
+            (self.object.proyecto.nombre,
+             reverse("web:proyecto_detalle", args=[self.object.proyecto_id])),
+            (self.object.nombre,
+             reverse("web:actividad_detalle", args=[self.object.pk])),
+            ("Editar", None),
         ]
         return ctx
 

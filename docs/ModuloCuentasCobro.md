@@ -170,12 +170,13 @@ Cada acción restringida a su actor.
   activa, el método lanza error (es lo esperado: primero se declina).
 
 ### 3. Revisión secuencial (GATING — lo central del módulo)
-- Orden estricto: **jurídico → administrativo → técnico**. Este orden **NO está en
-  los modelos; lo implementas en servicios.**
+- Orden estricto: **técnico → jurídico → administrativo**. Este orden **NO está en
+  los modelos; lo implementas en servicios.** (El técnico va primero porque es quien
+  suele pedir más ajustes; así una devolución reinicia desde él y evita re-trabajo.)
 - Reglas de habilitación:
-  - `AD` no se habilita hasta que exista una `RevisionCuentaCobro` con `rol=JU` y
+  - `JU` no se habilita hasta que exista una `RevisionCuentaCobro` con `rol=TE` y
     `resultado=AP` sobre la última `DocumentoEntrega`.
-  - `TE` no se habilita hasta que exista la de `rol=AD` con `resultado=AP` sobre la
+  - `AD` no se habilita hasta que exista la de `rol=JU` con `resultado=AP` sobre la
     misma entrega.
 - Cada revisor emite `RevisionCuentaCobro` (apuntando a su `AsignacionRevisor`
   activa, sobre la **última** `DocumentoEntrega`):
@@ -193,7 +194,7 @@ Cada acción restringida a su actor.
 
 **Reinicio TOTAL del ciclo (decisión definitiva del equipo):** ante cualquier
 devolución (`AJ`/`RE`) de cualquier rol, el flujo **reinicia completo desde el
-revisor jurídico**. NO hay carry-forward: la nueva versión de `DocumentoEntrega`
+revisor técnico**. NO hay carry-forward: la nueva versión de `DocumentoEntrega`
 nace **vacía** y el contratista vuelve a entregar el **paquete completo** de
 documentos; los tres roles re-revisan desde cero. Esto cae naturalmente del modelo
 (las `RevisionCuentaCobro` cuelgan de `documento_entrega` y `actualizar_estado`
@@ -347,7 +348,7 @@ flujo; NO se persiste ningún modelo `Notificacion` ni se toca el modelo. No hay
   `estado_supervisor=AP` pendientes de cargar el cierre firmado.
 - **Revisor (JU/AD/TE):** cuentas donde tiene una `AsignacionRevisor` activa **y su
   turno está habilitado** por el gating (su rol es el siguiente en
-  jurídico→administrativo→técnico) y aún no ha emitido revisión sobre la última
+  técnico→jurídico→administrativo) y aún no ha emitido revisión sobre la última
   entrega.
 - **Rol administrativo / secop (trámites finales):** cuentas donde su
   `TramiteFinal` (`SF`/`SC`) está habilitado por la secuencia y aún no
@@ -511,10 +512,10 @@ grupo de Django, se resuelve por `AsignacionRevisor.rol` por cuenta. Por tanto:
    `TramiteFinal` y
    `EventoTrazabilidad`.
 8. Tests (`tests/`): camino feliz completo (cargue → "Entregar" → radicación →
-   asignación → revisión jurídica→admin→técnica → decisión supervisor → cargue de
+   asignación → revisión técnica→jurídica→admin → decisión supervisor → cargue de
    cierre firmado por radicación → trámites finales `SF`→`SC` → cierre); gating
-   secuencial (que `TE` no arranque sin `AD`); completitud (falta un obligatorio →
-   no avanza); declinación + reasignación; **reinicio TOTAL desde jurídico** (ante
+   secuencial (que `JU` no arranque sin `TE`); completitud (falta un obligatorio →
+   no avanza); declinación + reasignación; **reinicio TOTAL desde técnico** (ante
    cualquier devolución, la nueva versión nace vacía, el contratista reentrega el
    paquete completo y los tres roles re-revisan desde cero; el archivo de la versión
    previa se preserva); creación automática de versión vía "Entregar" (no manual);
@@ -548,9 +549,9 @@ grupo de Django, se resuelve por `AsignacionRevisor.rol` por cuenta. Por tanto:
   del supervisor (para firma) → cargue de cierre firmado por radicación → trámites
   finales (`SF` administrativo, `SC` secop) → cierre.
 - La completitud documental se valida contra `RequisitoDocumental`.
-- El gating secuencial (jurídico→administrativo→técnico) es inviolable desde la UI
+- El gating secuencial (técnico→jurídico→administrativo) es inviolable desde la UI
   y desde servicios.
-- Ante cualquier devolución, el flujo reinicia **totalmente desde jurídico**: nueva
+- Ante cualquier devolución, el flujo reinicia **totalmente desde técnico**: nueva
   versión vacía, reentrega del paquete completo, re-revisión de los tres roles; el
   archivo de la versión anterior se preserva. La versión se crea automáticamente con
   "Entregar", nunca de forma manual.
