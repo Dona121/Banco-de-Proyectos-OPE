@@ -133,8 +133,15 @@ class ReasignacionForm(EstilizadoMixin, forms.Form):
 # Revisor
 # --------------------------------------------------------------------------- #
 class RevisionForm(EstilizadoMixin, forms.Form):
+    # El revisor solo aprueba o devuelve (requiere ajustes); el rechazo definitivo
+    # no aplica en esta etapa (ver services.registrar_revision).
+    _RES = RevisionCuentaCobro.ResultadoRevision
     resultado = forms.ChoiceField(
-        label="Resultado", choices=RevisionCuentaCobro.ResultadoRevision.choices
+        label="Resultado",
+        choices=[
+            (_RES.APROBADA.value, _RES.APROBADA.label),
+            (_RES.AJUSTES.value, _RES.AJUSTES.label),
+        ],
     )
     comentario = forms.CharField(
         label="Observaciones",

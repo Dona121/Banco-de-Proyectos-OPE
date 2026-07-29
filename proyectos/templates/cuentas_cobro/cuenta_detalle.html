@@ -24,8 +24,8 @@
   </div>
 
   <div class="mt-4 flex flex-wrap items-center gap-2 text-sm">
-    <span class="text-slate-500">Revisores:</span> {% cc_badge cuenta.estado_revisores "En proceso" %}
-    <span class="ml-3 text-slate-500">Supervisor:</span> {% cc_badge cuenta.estado_supervisor "Pendiente" %}
+    <span class="text-slate-500">Revisores:</span> {% cc_badge cuenta.estado_revisores "En proceso" proceso="revisores" %}
+    <span class="ml-3 text-slate-500">Supervisor:</span> {% cc_badge cuenta.estado_supervisor "Pendiente" proceso="supervisor" %}
     {% if cuenta.fecha_radicacion %}<span class="ml-3 text-slate-500">Radicada {{ cuenta.fecha_radicacion|date:"d M Y" }}</span>{% endif %}
     {% if cuenta.fecha_cierre %}<span class="badge badge-aprobada ml-3">Cerrada {{ cuenta.fecha_cierre|date:"d M Y" }}</span>{% endif %}
   </div>
@@ -62,7 +62,7 @@
               <td class="font-medium text-slate-700">{{ d.tipo_documento.nombre }}
                 {% if d.comentario %}<p class="text-xs text-slate-400">{{ d.comentario }}</p>{% endif %}
               </td>
-              <td>{% cc_badge d.estado %}</td>
+              <td>{% cc_badge d.estado proceso="documento" %}</td>
               <td><a href="{{ d.documento.url }}" target="_blank" class="text-brand font-semibold hover:underline">Abrir</a></td>
               {% if puede_marcar_docs %}
               <td>
@@ -86,6 +86,8 @@
           </tbody>
         </table>
       </div>
+
+      {% if puede_marcar_docs %}{% cc_leyenda "documento" %}{% endif %}
 
       {% if puede_cargar and faltantes %}
       <form method="post" action="{% url 'cuentas_cobro:documento_cargar' cuenta.pk %}" enctype="multipart/form-data"
@@ -118,7 +120,7 @@
       <ul class="space-y-2 mb-4">
         {% for r in radicaciones %}
         <li class="flex items-center gap-3 text-sm">
-          {% cc_badge r.resultado %}
+          {% cc_badge r.resultado proceso="radicacion" %}
           <span class="text-slate-600">{{ r.comentario }}</span>
           <span class="ml-auto text-xs text-slate-400">{{ r.fecha_creacion|naturaltime }}</span>
         </li>
@@ -129,6 +131,7 @@
       <form method="post" action="{% url 'cuentas_cobro:radicacion' cuenta.pk %}" class="space-y-4 border-t border-slate-100 pt-4">
         {% csrf_token %}
         {% include 'components/form_field.html' with field=radicacion_form.resultado %}
+        {% cc_leyenda "radicacion" %}
         {% include 'components/form_field.html' with field=radicacion_form.comentario %}
         <button class="btn btn-primary">Registrar decisión de radicación</button>
       </form>
@@ -139,13 +142,13 @@
 
     <!-- Revisión secuencial -->
     <div class="card p-6">
-      <h2 class="font-head font-semibold text-slate-800 mb-4">Revisión (jurídico → administrativo → técnico)</h2>
+      <h2 class="font-head font-semibold text-slate-800 mb-4">Revisión (técnico → jurídico → administrativo)</h2>
       <div class="space-y-3">
         {% for fila in tablero %}
         <div class="rounded-lg border border-slate-100 p-4">
           <div class="flex flex-wrap items-center gap-3">
             <span class="font-semibold text-slate-700">{{ fila.rol_label }}</span>
-            {% if fila.revision %}{% cc_badge fila.revision.resultado %}
+            {% if fila.revision %}{% cc_badge fila.revision.resultado proceso="revision" %}
             {% elif fila.habilitado %}<span class="badge badge-revision">En turno</span>
             {% else %}<span class="badge badge-pendiente">En espera</span>{% endif %}
             {% if fila.asignacion %}
@@ -179,11 +182,12 @@
       <h2 class="font-head font-semibold text-slate-800 mb-1">Decisión final del supervisor</h2>
       <p class="text-xs text-slate-400 mb-4">Aprobación para la firma de los documentos de cierre.</p>
       {% if cuenta.estado_supervisor %}
-      <div class="flex items-center gap-3">{% cc_badge cuenta.estado_supervisor %}<span class="text-sm text-slate-600">{{ cuenta.comentario }}</span></div>
+      <div class="flex items-center gap-3">{% cc_badge cuenta.estado_supervisor proceso="supervisor" %}<span class="text-sm text-slate-600">{{ cuenta.comentario }}</span></div>
       {% elif puede_decidir %}
       <form method="post" action="{% url 'cuentas_cobro:decision' cuenta.pk %}" class="space-y-4">
         {% csrf_token %}
         {% include 'components/form_field.html' with field=decision_form.resultado %}
+        {% cc_leyenda "supervisor" %}
         {% include 'components/form_field.html' with field=decision_form.comentario %}
         <button class="btn btn-primary">Registrar decisión</button>
       </form>
@@ -273,6 +277,7 @@
         <form method="post" action="{% url 'cuentas_cobro:revisar' item.asignacion.pk %}" class="mt-2 space-y-3">
           {% csrf_token %}
           {% include 'components/form_field.html' with field=revision_form.resultado %}
+          {% cc_leyenda "revision" %}
           {% include 'components/form_field.html' with field=revision_form.comentario %}
           <button class="btn btn-primary w-full">Registrar revisión</button>
         </form>

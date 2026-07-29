@@ -90,8 +90,11 @@ def puede_entregar(user, cuenta):
 
 def puede_radicar(user, cuenta):
     """Aprueban la radicación el supervisor o el rol de radicación, tras la
-    entrega del contratista y antes de radicar."""
+    entrega del contratista y antes de radicar. Un rechazo definitivo en
+    radicación es terminal: ya no se puede volver a decidir."""
     if cuenta.fecha_radicacion is not None:
+        return False
+    if services.radicacion_rechazada(cuenta):
         return False
     if not rol_aprueba_radicacion(user):
         return False

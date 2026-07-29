@@ -144,16 +144,26 @@ Cada acción restringida a su actor.
    rol de radicación **o** el supervisor emite `RevisionParaRadicacion` con
    `resultado`:
    - **`AP` (Aprobado)** → llama a `cuenta.actualizar_fecha_radicacion()`. Avanza
-     a asignación de revisores. Registra `EventoTrazabilidad(etapa=RAD)`.
+     a asignación de revisores. Registra `EventoTrazabilidad(etapa=RAD)`. **Solo se
+     puede aprobar si todos los documentos obligatorios están `AP`/`NA`** (ninguno
+     `PE`/`RE`); un `NA` no cuenta como faltante de un obligatorio que sí está.
    - **`AJ` (Requiere ajustes)** → devuelve al contratista. El sistema habilita
      automáticamente una nueva versión de `DocumentoEntrega` (vacía); el contratista
      vuelve a cargar el **paquete completo** y pulsa **"Entregar"**. No hay creación
      manual de versiones.
-   - **`RE` (Rechazado)** → para el caso "documento que no aplica", marca el
-     `DocumentosCuentaCobro` correspondiente con `estado=NA` o `RE` y su
-     `comentario` (causal). Si los demás documentos obligatorios sí cumplen, la
-     entrega puede darse por cumplida; un documento `NA` no bloquea la completitud
-     (un `NA` no cuenta como faltante de un obligatorio que sí está).
+   - **`RE` (Rechazado)** → **rechazo definitivo (estado terminal)**: la cuenta
+     queda **sin radicar** y **no continúa** (no genera nueva versión). Requiere
+     marcar con `estado=RE` al menos un `DocumentosCuentaCobro` (con su
+     `comentario`/causal). Como la radicación no tiene un campo de estado propio en
+     la cuenta, el rechazo se **deriva** del último `RevisionParaRadicacion`
+     (`services.radicacion_rechazada`): a partir de ahí `puede_radicar` es falso (el
+     formulario de decisión desaparece), el stepper marca la etapa como *Rechazada*
+     y ya no se generan notificaciones de radicación. (Análogo al rechazo del
+     supervisor, que es terminal vía `estado_supervisor=RE`.)
+   - **Coherencia obligatoria (validada en servicios).** Devolver (`AJ`) o rechazar
+     (`RE`) **exige que al menos un documento esté `RE`**; si todos están `AP`/`NA`,
+     la única acción válida es **aprobar**. La impone `registrar_revision_radicacion`
+     (simétrica a la regla de aprobación).
 
 ### 2. Asignación de revisores
 1. Solo habilitada si `cuenta.fecha_radicacion` no es nulo.
@@ -179,15 +189,23 @@ Cada acción restringida a su actor.
   - `AD` no se habilita hasta que exista la de `rol=JU` con `resultado=AP` sobre la
     misma entrega.
 - Cada revisor emite `RevisionCuentaCobro` (apuntando a su `AsignacionRevisor`
-  activa, sobre la **última** `DocumentoEntrega`):
+  activa, sobre la **última** `DocumentoEntrega`). **El revisor solo tiene dos
+  opciones: aprobar (`AP`) o devolver / requiere ajustes (`AJ`).** El rechazo
+  definitivo (`RE`) **NO aplica en esta etapa** (una devolución ya reinicia el
+  ciclo; el rechazo terminal solo existe en radicación y en la decisión del
+  supervisor). Tanto el formulario como `registrar_revision` restringen a `AP`/`AJ`.
   - **`AP`** → habilita el siguiente rol. Registra `EventoTrazabilidad(etapa=REV)`.
     **Para aprobar, ningún documento de la entrega puede estar `PENDIENTE` ni
     `RECHAZADO`** (todos en `AP`/`NA`): lo impone `RevisionCuentaCobro.clean()`, así
     que la UI debe guiar al revisor a resolver el estado de cada documento (AP/NA/RE)
     antes de habilitar "Aprobar".
-  - **`AJ` / `RE`** → devuelve al contratista. El revisor marca **por documento**
-    cuáles se observan: pone `DocumentosCuentaCobro.estado = RE` (o `NA`) con su
-    `comentario`/causal en los que no cumplen, y deja en `AP` los que sí.
+  - **`AJ` (requiere ajustes)** → devuelve al contratista. El revisor marca **por
+    documento** cuáles se observan: pone `DocumentosCuentaCobro.estado = RE` (o `NA`)
+    con su `comentario`/causal en los que no cumplen, y deja en `AP` los que sí.
+    **Simétrico a la aprobación: para devolver debe existir al menos un documento
+    `RE`.** Si todos están `AP`/`NA`, no hay nada que corregir y la única acción
+    válida es aprobar; lo impone `registrar_revision`. (Así, con todos los
+    documentos aprobados, "requiere ajustes" queda bloqueado.)
 - Tras cada `AP`, llama a `cuenta.actualizar_estado()`: cuando los **tres roles**
   estén `AP` en la última entrega, marcará `estado_revisores=AP` y
   `fecha_aprobacion_revisores`.
@@ -200,6 +218,13 @@ documentos; los tres roles re-revisan desde cero. Esto cae naturalmente del mode
 (las `RevisionCuentaCobro` cuelgan de `documento_entrega` y `actualizar_estado`
 solo mira la última versión), así que no copies ni arrastres revisiones ni
 documentos de versiones anteriores.
+
+**La versión nueva NO es revisable hasta que el contratista la reentregue.** El
+gating (`rol_habilitado`) exige que la última versión tenga su evento "enviada"
+(`entrega_enviada`): tras una devolución, la versión vacía queda a la espera del
+contratista y **ningún revisor** puede actuar sobre ella (ni ver el formulario de
+revisión) hasta que recargue el paquete y pulse **"Entregar"**. Sin esto, el
+reinicio se saltaría y un revisor podría "aprobar" una versión vacía.
 
 **Versionamiento del paquete:** se versiona el **paquete de entrega completo**
 (`DocumentoEntrega`), no documentos individuales. El archivo de las versiones

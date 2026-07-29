@@ -11,6 +11,7 @@ from cuentas_de_cobro.models import (
     DocumentosCuentaCobro,
     RequisitoDocumental,
     RevisionCuentaCobro,
+    RevisionParaRadicacion,
     TipoDocumentoCargue,
     TramiteFinal,
     Vigencia,
@@ -18,7 +19,8 @@ from cuentas_de_cobro.models import (
 
 Rol = RevisionCuentaCobro.Rol
 ResRev = RevisionCuentaCobro.ResultadoRevision
-ResRad = CuentaEntrega.ResultadoRevision
+ResRad = CuentaEntrega.ResultadoRevision          # APROBADA / RECHAZADA (estado de la cuenta)
+ResRadic = RevisionParaRadicacion.ResultadoRevision  # APROBADA / AJUSTES / RECHAZADA
 Tipo = TramiteFinal.Tipo
 
 
@@ -82,6 +84,20 @@ class FlujoBaseTest(TestCase):
         services.registrar_revision(a_ju, ResRev.APROBADA, "ok")
         services.registrar_revision(a_ad, ResRev.APROBADA, "ok")
         return a_ju, a_ad, a_te
+
+    def _rechazar_un_doc(self, cuenta):
+        """Rechaza el primer documento de la última entrega (habilita devolver)."""
+        doc = services.ultima_entrega(cuenta).documentoscuentacobro_set.first()
+        services.revisar_documento(
+            doc, DocumentosCuentaCobro.EstadoDocumento.RECHAZADO, "corrige"
+        )
+
+    def _recargar_y_entregar(self, cuenta):
+        """El contratista recarga el paquete de la versión vigente y la entrega."""
+        entrega = services.ultima_entrega(cuenta)
+        services.adjuntar_documento(entrega, self.t1, _archivo())
+        services.adjuntar_documento(entrega, self.t2, _archivo())
+        services.entregar(cuenta, self.contratista)
 
 
 class CaminoFelizTest(FlujoBaseTest):
@@ -240,15 +256,20 @@ class MarcadoDocumentosTest(FlujoBaseTest):
 
 
 class ReinicioTotalTest(FlujoBaseTest):
-    def test_devolucion_genera_version_vacia_reinicia_en_tecnico(self):
+    def test_devolucion_genera_version_vacia_y_exige_reentrega(self):
         cuenta = self._radicar(self._cuenta_con_documentos())
         _, _, a_te = self._asignar_todos(cuenta)
-        # Devolución del técnico (primero) → el sistema genera versión nueva automáticamente.
+        # Devolución del técnico (primero): requiere rechazar un documento.
+        self._rechazar_un_doc(cuenta)
         services.registrar_revision(a_te, ResRev.AJUSTES, "corrige")
 
         entrega2 = services.ultima_entrega(cuenta)
         self.assertEqual(entrega2.numero_version, 2)
         self.assertEqual(entrega2.revisioncuentacobro_set.count(), 0)
+        # La v2 nace vacía y SIN entregar: aún nadie puede revisarla.
+        self.assertFalse(services.rol_habilitado(entrega2, Rol.TECNICO))
+        # Tras recargar y reentregar, el técnico (primero) queda habilitado.
+        self._recargar_y_entregar(cuenta)
         self.assertTrue(services.rol_habilitado(entrega2, Rol.TECNICO))
         self.assertFalse(services.rol_habilitado(entrega2, Rol.JURIDICO))
 
@@ -256,12 +277,37 @@ class ReinicioTotalTest(FlujoBaseTest):
         cuenta = self._radicar(self._cuenta_con_documentos())
         a_ju, a_ad, a_te = self._asignar_todos(cuenta)
         services.registrar_revision(a_te, ResRev.APROBADA, "ok")
+        self._rechazar_un_doc(cuenta)
         services.registrar_revision(a_ju, ResRev.AJUSTES, "corrige")
 
         entrega2 = services.ultima_entrega(cuenta)
         self.assertEqual(entrega2.revisioncuentacobro_set.count(), 0)
+        # Reinicia desde el técnico, pero solo tras la reentrega del contratista.
+        self.assertFalse(services.rol_habilitado(entrega2, Rol.TECNICO))
+        self._recargar_y_entregar(cuenta)
         self.assertTrue(services.rol_habilitado(entrega2, Rol.TECNICO))
         self.assertFalse(services.rol_habilitado(entrega2, Rol.JURIDICO))
+
+    def test_no_se_puede_aprobar_la_version_vacia_tras_devolucion(self):
+        # Escenario reportado: tras devolver, el revisor NO debe poder aprobar la
+        # versión nueva vacía sin que el contratista reentregue.
+        cuenta = self._radicar(self._cuenta_con_documentos())
+        _, _, a_te = self._asignar_todos(cuenta)
+        self._rechazar_un_doc(cuenta)
+        services.registrar_revision(a_te, ResRev.AJUSTES, "corrige")
+        with self.assertRaises(ValidationError):
+            services.registrar_revision(a_te, ResRev.APROBADA, "ok")
+
+    def test_form_de_revision_oculto_hasta_reentrega(self):
+        cuenta = self._radicar(self._cuenta_con_documentos())
+        _, _, a_te = self._asignar_todos(cuenta)
+        self._rechazar_un_doc(cuenta)
+        services.registrar_revision(a_te, ResRev.AJUSTES, "corrige")
+        # El botón/form de revisar se controla con selectors.puede_revisar.
+        a_te.refresh_from_db()
+        self.assertFalse(selectors.puede_revisar(self.rev_te, a_te))
+        self._recargar_y_entregar(cuenta)
+        self.assertTrue(selectors.puede_revisar(self.rev_te, a_te))
 
 
 class TramitesFinalesTest(FlujoBaseTest):
@@ -334,10 +380,182 @@ class TramitesFinalesTest(FlujoBaseTest):
                 cuenta, Tipo.CARGUE_SIIFWEB, self.rev_ad, True, None, "sin evidencia")
 
 
+class RadicacionCoherenteConDocumentosTest(FlujoBaseTest):
+    """En la radicación (primera revisión), devolver/rechazar exige al menos un
+    documento rechazado; aprobar exige que todos estén AP/NA."""
+
+    def _entregada(self):
+        cuenta = self._cuenta_con_documentos()
+        self._entregar(cuenta)
+        return cuenta
+
+    def _aprobar_todos_los_docs(self, cuenta):
+        for d in services.ultima_entrega(cuenta).documentoscuentacobro_set.all():
+            services.revisar_documento(d, d.EstadoDocumento.APROBADO)
+
+    def test_no_devuelve_si_ningun_documento_esta_rechazado(self):
+        cuenta = self._entregada()
+        self._aprobar_todos_los_docs(cuenta)
+        with self.assertRaises(ValidationError):
+            services.registrar_revision_radicacion(
+                cuenta, self.supervisor, ResRadic.AJUSTES, "corrige")
+
+    def test_no_rechaza_si_ningun_documento_esta_rechazado(self):
+        cuenta = self._entregada()
+        self._aprobar_todos_los_docs(cuenta)
+        with self.assertRaises(ValidationError):
+            services.registrar_revision_radicacion(
+                cuenta, self.supervisor, ResRad.RECHAZADA, "no cumple")
+
+    def test_devuelve_si_hay_documento_rechazado(self):
+        cuenta = self._entregada()
+        doc = services.ultima_entrega(cuenta).documentoscuentacobro_set.first()
+        services.revisar_documento(doc, doc.EstadoDocumento.RECHAZADO, "corrige")
+        services.registrar_revision_radicacion(
+            cuenta, self.supervisor, ResRadic.AJUSTES, "corrige")
+        cuenta.refresh_from_db()
+        # Devolución → versión nueva vacía y sigue sin radicar.
+        self.assertIsNone(cuenta.fecha_radicacion)
+        self.assertEqual(services.ultima_entrega(cuenta).numero_version, 2)
+
+
+class RadicacionRechazoTerminalTest(FlujoBaseTest):
+    """El rechazo en radicación es terminal: la cuenta queda rechazada, no admite
+    más decisiones y no vuelve a notificar."""
+
+    def _entregada_con_doc_rechazado(self):
+        cuenta = self._cuenta_con_documentos()
+        self._entregar(cuenta)
+        doc = services.ultima_entrega(cuenta).documentoscuentacobro_set.first()
+        services.revisar_documento(doc, doc.EstadoDocumento.RECHAZADO, "no corresponde")
+        return cuenta
+
+    def test_rechazo_es_terminal(self):
+        cuenta = self._entregada_con_doc_rechazado()
+        services.registrar_revision_radicacion(
+            cuenta, self.supervisor, ResRadic.RECHAZADA, "rechazada")
+        cuenta.refresh_from_db()
+        self.assertTrue(services.radicacion_rechazada(cuenta))
+        self.assertIsNone(cuenta.fecha_radicacion)
+        # Ya no se puede volver a decidir la radicación (el form desaparece).
+        self.assertFalse(selectors.puede_radicar(self.supervisor, cuenta))
+        self.assertFalse(selectors.puede_radicar(self.radicador, cuenta))
+        # Se muestra como rechazada en el paso actual y en el stepper.
+        self.assertTrue(services.paso_actual(cuenta)["rechazada"])
+        etapa = next(
+            e for e in services.flujo_de_cuenta(cuenta) if e["clave"] == "radicacion"
+        )
+        self.assertEqual(etapa["estado"], "rechazada")
+
+    def test_rechazo_no_deja_notificacion_de_radicacion(self):
+        cuenta = self._entregada_con_doc_rechazado()
+        services.registrar_revision_radicacion(
+            cuenta, self.supervisor, ResRadic.RECHAZADA, "rechazada")
+        textos = [n["texto"] for n in services.notificaciones_para(self.radicador)]
+        self.assertFalse(any("aprobación de radicación" in t for t in textos))
+
+
+class RevisionCoherenteConDocumentosTest(FlujoBaseTest):
+    """La revisión debe ser coherente con el estado de los documentos:
+    aprobar exige todos AP/NA; devolver exige al menos uno rechazado."""
+
+    def test_no_devuelve_si_ningun_documento_esta_rechazado(self):
+        cuenta = self._radicar(self._cuenta_con_documentos())
+        _, _, a_te = self._asignar_todos(cuenta)
+        # Todos los documentos quedaron aprobados en la radicación: no hay nada que
+        # corregir, así que "requiere ajustes" debe fallar.
+        with self.assertRaises(ValidationError):
+            services.registrar_revision(a_te, ResRev.AJUSTES, "corrige")
+
+    def test_devuelve_si_hay_documento_rechazado(self):
+        cuenta = self._radicar(self._cuenta_con_documentos())
+        _, _, a_te = self._asignar_todos(cuenta)
+        self._rechazar_un_doc(cuenta)
+        services.registrar_revision(a_te, ResRev.AJUSTES, "corrige")
+        self.assertEqual(services.ultima_entrega(cuenta).numero_version, 2)
+
+    def test_no_aprueba_si_hay_documento_rechazado(self):
+        cuenta = self._radicar(self._cuenta_con_documentos())
+        _, _, a_te = self._asignar_todos(cuenta)
+        self._rechazar_un_doc(cuenta)
+        with self.assertRaises(ValidationError):
+            services.registrar_revision(a_te, ResRev.APROBADA, "ok")
+
+
+class RevisionTresRevisoresTest(FlujoBaseTest):
+    """Los dos bugs no deben reaparecer con NINGUNO de los tres revisores
+    (técnico, jurídico, administrativo), no solo con el primero del gating."""
+
+    ROLES = (Rol.TECNICO, Rol.JURIDICO, Rol.ADMINISTRATIVO)
+
+    def _avanzar_hasta(self, cuenta, objetivo):
+        """Asigna los tres revisores y aprueba los roles previos a ``objetivo``
+        según el orden del gating. Devuelve la asignación del rol objetivo."""
+        a_ju, a_ad, a_te = self._asignar_todos(cuenta)
+        por_rol = {Rol.JURIDICO: a_ju, Rol.ADMINISTRATIVO: a_ad, Rol.TECNICO: a_te}
+        for rol in services.SECUENCIA_ROLES:
+            if rol == objetivo:
+                break
+            services.registrar_revision(por_rol[rol], ResRev.APROBADA, "ok")
+        return por_rol[objetivo]
+
+    def test_ningun_revisor_devuelve_sin_documento_rechazado(self):
+        for objetivo in self.ROLES:
+            with self.subTest(rol=objetivo):
+                cuenta = self._radicar(self._cuenta_con_documentos())
+                asignacion = self._avanzar_hasta(cuenta, objetivo)
+                with self.assertRaises(ValidationError):
+                    services.registrar_revision(asignacion, ResRev.AJUSTES, "corrige")
+
+    def test_ningun_revisor_aprueba_con_documento_rechazado(self):
+        for objetivo in self.ROLES:
+            with self.subTest(rol=objetivo):
+                cuenta = self._radicar(self._cuenta_con_documentos())
+                asignacion = self._avanzar_hasta(cuenta, objetivo)
+                self._rechazar_un_doc(cuenta)
+                with self.assertRaises(ValidationError):
+                    services.registrar_revision(asignacion, ResRev.APROBADA, "ok")
+
+    def test_devolucion_de_cualquier_revisor_exige_reentrega(self):
+        for objetivo in self.ROLES:
+            with self.subTest(rol=objetivo):
+                cuenta = self._radicar(self._cuenta_con_documentos())
+                asignacion = self._avanzar_hasta(cuenta, objetivo)
+                self._rechazar_un_doc(cuenta)
+                services.registrar_revision(asignacion, ResRev.AJUSTES, "corrige")
+                entrega2 = services.ultima_entrega(cuenta)
+                # v2 vacía y sin reentregar: NINGÚN rol puede revisarla.
+                for rol in self.ROLES:
+                    self.assertFalse(services.rol_habilitado(entrega2, rol))
+                # Tras la reentrega, el ciclo reinicia en el técnico (primero).
+                self._recargar_y_entregar(cuenta)
+                self.assertTrue(services.rol_habilitado(entrega2, Rol.TECNICO))
+                self.assertFalse(services.rol_habilitado(entrega2, Rol.JURIDICO))
+                self.assertFalse(services.rol_habilitado(entrega2, Rol.ADMINISTRATIVO))
+
+
+class RevisorSinRechazoTest(FlujoBaseTest):
+    """El revisor solo puede aprobar o devolver (requiere ajustes); el rechazo
+    definitivo (RE) no aplica en la etapa de revisión."""
+
+    def test_revisor_no_puede_rechazar(self):
+        cuenta = self._radicar(self._cuenta_con_documentos())
+        _, _, a_te = self._asignar_todos(cuenta)
+        with self.assertRaises(ValidationError):
+            services.registrar_revision(a_te, ResRev.RECHAZADA, "no")
+
+    def test_formulario_solo_ofrece_aprobar_o_ajustes(self):
+        from cuentas_de_cobro.forms import RevisionForm
+        codigos = {c for c, _ in RevisionForm().fields["resultado"].choices}
+        self.assertEqual(codigos, {ResRev.APROBADA, ResRev.AJUSTES})
+        self.assertNotIn(ResRev.RECHAZADA, codigos)
+
+
 class TrazabilidadTest(FlujoBaseTest):
     def test_eventos_y_marca_de_devolucion(self):
         cuenta = self._radicar(self._cuenta_con_documentos())
         _, _, a_te = self._asignar_todos(cuenta)
+        self._rechazar_un_doc(cuenta)
         services.registrar_revision(a_te, ResRev.AJUSTES, "corrige")
 
         eventos = list(cuenta.eventos.values_list("evento", flat=True))

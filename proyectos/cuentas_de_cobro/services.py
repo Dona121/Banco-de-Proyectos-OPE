@@ -15,8 +15,9 @@ vistas son delgadas y solo invocan estas funciones. Decisiones de diseño:
   estado.
 * **Reinicio TOTAL del ciclo (decisión definitiva).** Ante cualquier devolución
   (`AJ`/`RE`) de cualquier rol, el flujo reinicia completo desde el revisor
-  jurídico: la nueva versión nace vacía y los tres roles re-revisan desde cero.
-  No se arrastran revisiones ni documentos de versiones anteriores.
+  técnico: la nueva versión nace vacía, el contratista recarga y vuelve a entregar,
+  y los tres roles re-revisan desde cero. No se arrastran revisiones ni documentos
+  de versiones anteriores.
 """
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -262,6 +263,21 @@ def entrega_enviada(cuenta):
     ).exists()
 
 
+def radicacion_rechazada(cuenta):
+    """True si la radicación se **rechazó de forma definitiva** (la última decisión
+    de radicación fue `RE` y la cuenta no quedó radicada). Es un estado terminal:
+    no genera nueva versión y no admite más acciones (a diferencia de `AJ`, que
+    devuelve para corregir). Se deriva de los registros ``RevisionParaRadicacion``
+    porque la radicación no tiene un campo de estado propio en la cuenta."""
+    if cuenta.fecha_radicacion is not None:
+        return False
+    ultima = cuenta.revisionpararadicacion_set.order_by("fecha_creacion").last()
+    return (
+        ultima is not None
+        and ultima.resultado == RevisionParaRadicacion.ResultadoRevision.RECHAZADA
+    )
+
+
 @transaction.atomic
 def entregar(cuenta, usuario):
     """Acción "Entregar" del contratista: valida completitud y envía a revisión.
@@ -314,6 +330,18 @@ def registrar_revision_radicacion(cuenta, usuario, resultado, comentario):
             nombres = ", ".join(d.tipo_documento.nombre for d in pendientes)
             raise ValidationError(
                 f"Hay documentos obligatorios sin aprobar: {nombres}."
+            )
+    else:
+        # Devolver (requiere ajustes) o rechazar exige que al menos un documento
+        # esté rechazado; si todos están correctos, la única opción es aprobar.
+        entrega = ultima_entrega(cuenta)
+        hay_rechazados = entrega is not None and entrega.documentoscuentacobro_set.filter(
+            estado=DocumentosCuentaCobro.EstadoDocumento.RECHAZADO
+        ).exists()
+        if not hay_rechazados:
+            raise ValidationError(
+                "Para devolver o rechazar la cuenta debes marcar como rechazado al "
+                "menos un documento. Si todos están correctos, aprueba la radicación."
             )
 
     revision = RevisionParaRadicacion.objects.create(
@@ -401,8 +429,16 @@ def _roles_aprobados(entrega):
 
 
 def rol_habilitado(entrega, rol):
-    """True si ``rol`` puede revisar ahora sobre ``entrega`` (gating secuencial)."""
+    """True si ``rol`` puede revisar ahora sobre ``entrega`` (gating secuencial).
+
+    Exige además que la versión haya sido **entregada** por el contratista: tras
+    una devolución nace una versión nueva vacía, y nadie puede revisarla hasta que
+    el contratista recargue el paquete y vuelva a pulsar "Entregar". Sin esto, el
+    reinicio se saltaría y el revisor podría aprobar la versión vacía.
+    """
     if entrega is None:
+        return False
+    if not entrega_enviada(entrega.cuenta_entrega):
         return False
     aprobados = _roles_aprobados(entrega)
     if rol in aprobados:
@@ -419,14 +455,20 @@ def registrar_revision(asignacion, resultado, comentario):
 
     - Aprobado → habilita el siguiente rol; si los tres aprobaron, dispara
       ``actualizar_estado`` (estado_revisores = Aprobada).
-    - Requiere ajustes / Rechazado → devuelve al contratista: el sistema genera
-      una nueva versión vacía (reinicio total desde el primer rol: el técnico).
+    - Requiere ajustes → devuelve al contratista: el sistema genera una nueva
+      versión vacía (reinicio total desde el primer rol: el técnico).
+
+    El revisor solo puede **aprobar** o **devolver** (requiere ajustes). El
+    "rechazo" (RE) no aplica en esta etapa: una devolución ya reinicia el ciclo; el
+    rechazo definitivo solo existe en radicación y en la decisión del supervisor.
     """
     cuenta = _lock(asignacion.cuenta_entrega)
     Resultado = RevisionCuentaCobro.ResultadoRevision
 
-    if resultado not in Resultado.values:
-        raise ValidationError("Resultado de revisión inválido.")
+    if resultado not in (Resultado.APROBADA, Resultado.AJUSTES):
+        raise ValidationError(
+            "La revisión solo puede aprobarse o devolverse (requiere ajustes)."
+        )
     if cuenta.fecha_radicacion is None:
         raise ValidationError("La cuenta no está radicada.")
     if asignacion.estado != AsignacionRevisor.Estado.ACTIVA:
@@ -439,6 +481,20 @@ def registrar_revision(asignacion, resultado, comentario):
         raise ValidationError(
             "Aún no es el turno de este rol o ya fue revisado en esta versión."
         )
+
+    # Coherencia entre el resultado y el estado de los documentos:
+    #  - Aprobar exige que ninguno esté pendiente/rechazado (lo valida el modelo).
+    #  - Devolver (ajustes/rechazo) exige al menos un documento rechazado; si todos
+    #    están correctos no hay nada que corregir y debe aprobarse.
+    if resultado != Resultado.APROBADA:
+        hay_rechazados = entrega.documentoscuentacobro_set.filter(
+            estado=DocumentosCuentaCobro.EstadoDocumento.RECHAZADO
+        ).exists()
+        if not hay_rechazados:
+            raise ValidationError(
+                "Para devolver la cuenta debes rechazar al menos un documento. "
+                "Si todos están correctos, aprueba la revisión."
+            )
 
     revision = RevisionCuentaCobro(
         documento_entrega=entrega, asignacion=asignacion,
@@ -667,7 +723,7 @@ def notificaciones_para(user):
     if es_supervisor(user):
         for c in base.filter(estado_supervisor__isnull=True):
             if c.fecha_radicacion is None:
-                if entrega_enviada(c):
+                if entrega_enviada(c) and not radicacion_rechazada(c):
                     items.append(_notif(
                         NOTIF_APROBACION, "Esperando aprobación de radicación", c))
             else:
@@ -683,7 +739,7 @@ def notificaciones_para(user):
     # Rol de radicación
     if es_radicacion(user):
         for c in base.filter(fecha_radicacion__isnull=True, estado_supervisor__isnull=True):
-            if entrega_enviada(c):
+            if entrega_enviada(c) and not radicacion_rechazada(c):
                 items.append(_notif(
                     NOTIF_APROBACION, "Esperando aprobación de radicación", c))
         for c in base.filter(estado_supervisor=AP):
@@ -761,6 +817,8 @@ def flujo_de_cuenta(cuenta):
     # 2. Radicación
     if radicada:
         etapas.append(_etapa("radicacion", "Radicación", HECHA, "Aprobada"))
+    elif radicacion_rechazada(cuenta):
+        etapas.append(_etapa("radicacion", "Radicación", RECHAZADA, "Rechazada"))
     elif enviada:
         etapas.append(_etapa("radicacion", "Radicación", ACTUAL, "Esperando aprobación"))
     else:
@@ -877,6 +935,12 @@ def paso_actual(cuenta):
     if cuenta.estado_supervisor == RE:
         return {
             "cerrada": False, "rechazada": True, "titulo": "Rechazada por el supervisor",
+            "detalle": "", "responsable": "—", "desde": _inicio_paso(cuenta),
+            "siguiente": "—", "siguiente_responsable": "—",
+        }
+    if radicacion_rechazada(cuenta):
+        return {
+            "cerrada": False, "rechazada": True, "titulo": "Rechazada en radicación",
             "detalle": "", "responsable": "—", "desde": _inicio_paso(cuenta),
             "siguiente": "—", "siguiente_responsable": "—",
         }
