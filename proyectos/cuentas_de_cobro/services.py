@@ -144,7 +144,23 @@ def registrar_evento(cuenta, actor, etapa, evento, detalle=""):
 # --------------------------------------------------------------------------- #
 @transaction.atomic
 def crear_cuenta(usuario, vigencia, mes, comentario):
-    """Crea la cuenta del contratista junto con su primera entrega (versión 1)."""
+    """Crea la cuenta del contratista junto con su primera entrega (versión 1).
+
+    Un contratista tiene UNA cuenta por vigencia y mes. La unicidad no se puede
+    imponer con una restricción de base de datos porque ``models.py`` es
+    definitivo, así que se valida aquí, dentro de la transacción y tras bloquear
+    las filas del periodo, para que dos peticiones simultáneas no creen dos.
+    """
+    duplicada = (
+        CuentaEntrega.objects.select_for_update()
+        .filter(usuario=usuario, vigencia=vigencia, mes=mes)
+        .exists()
+    )
+    if duplicada:
+        raise ValidationError(
+            f"Ya tienes una cuenta de cobro para {vigencia.vigencia} - "
+            f"{dict(CuentaEntrega.Meses.choices).get(mes, mes)}."
+        )
     cuenta = CuentaEntrega.objects.create(
         usuario=usuario, vigencia=vigencia, mes=mes, comentario=comentario or ""
     )
@@ -290,6 +306,18 @@ def entregar(cuenta, usuario):
     entrega = ultima_entrega(cuenta)
     if entrega is None:
         raise ValidationError("La cuenta no tiene una versión activa.")
+    if cuenta.estado_supervisor is not None:
+        raise ValidationError("Esta cuenta ya tiene decisión del supervisor.")
+    if radicacion_rechazada(cuenta):
+        raise ValidationError("Esta cuenta fue rechazada en radicación y no continúa.")
+    # Pulsar "Entregar" de nuevo sobre una versión ya enviada no cambia nada del
+    # flujo, pero duplica el evento ENVIADO: ensucia la trazabilidad y corre la
+    # fecha desde la que se mide cuánto lleva la cuenta en su paso actual.
+    if entrega_enviada(cuenta):
+        raise ValidationError(
+            "Ya entregaste esta versión; espera la revisión. Si te devolvieron "
+            "la cuenta, carga de nuevo los documentos antes de entregar."
+        )
     faltantes = documentos_faltantes(cuenta)
     if faltantes:
         nombres = ", ".join(t.nombre for t in faltantes)
@@ -317,6 +345,14 @@ def registrar_revision_radicacion(cuenta, usuario, resultado, comentario):
         raise ValidationError("Resultado de radicación inválido.")
     if cuenta.fecha_radicacion is not None:
         raise ValidationError("Esta cuenta ya fue radicada.")
+    # Un `RE` en radicación es terminal: la cuenta no continúa y no admite otra
+    # decisión. `puede_radicar` ya lo esconde en la interfaz, pero la guarda
+    # tiene que estar aquí, que es donde se decide la transición de estado.
+    if radicacion_rechazada(cuenta):
+        raise ValidationError(
+            "Esta cuenta fue rechazada definitivamente en radicación; no admite "
+            "una nueva decisión."
+        )
     if not entrega_enviada(cuenta):
         raise ValidationError("El contratista aún no ha entregado los documentos.")
 

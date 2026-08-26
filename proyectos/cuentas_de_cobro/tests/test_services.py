@@ -52,7 +52,14 @@ class FlujoBaseTest(TestCase):
 
     # -- helpers -------------------------------------------------------------- #
     def _cuenta_con_documentos(self):
-        cuenta = services.crear_cuenta(self.contratista, self.vigencia, 6, "junio")
+        # Un mes distinto en cada llamada: un contratista solo puede tener una
+        # cuenta por vigencia y mes, y hay pruebas que recorren los tres roles
+        # creando una cuenta por vuelta dentro del mismo método.
+        self._mes = getattr(self, "_mes", 0) % 12 + 1
+        cuenta = services.crear_cuenta(
+            self.contratista, self.vigencia, self._mes,
+            dict(CuentaEntrega.Meses.choices)[self._mes],
+        )
         entrega = services.ultima_entrega(cuenta)
         services.adjuntar_documento(entrega, self.t1, _archivo())
         services.adjuntar_documento(entrega, self.t2, _archivo())
