@@ -88,11 +88,14 @@ WSGI_APPLICATION = 'proyectos.wsgi.application'
 
 AWS_ACCESS_KEY_ID = os.getenv("SUPABASE_S3_ACCESS_KEY")
 AWS_SECRET_ACCESS_KEY = os.getenv("SUPABASE_S3_SECRET_KEY")
-AWS_STORAGE_BUCKET_NAME = "documentos"
+AWS_STORAGE_BUCKET_NAME = os.getenv("SUPABASE_BUCKET", "documentos")
 
 
-AWS_S3_ENDPOINT_URL = "https://jzuhwyxzxnqosgfmpxhy.storage.supabase.co/storage/v1/s3"
-AWS_S3_REGION_NAME = "us-east-1"
+# Endpoint S3 del proyecto de Supabase. Va por variable de entorno porque cambia
+# al mover la plataforma de cuenta/proyecto; dejarlo fijo en el codigo obliga a
+# tocar settings.py en cada migracion (y a recordar que estaba aqui escondido).
+AWS_S3_ENDPOINT_URL = os.getenv("SUPABASE_S3_ENDPOINT_URL")
+AWS_S3_REGION_NAME = os.getenv("SUPABASE_S3_REGION", "us-east-1")
 
 # Supabase exige path-style + firma v4
 AWS_S3_ADDRESSING_STYLE = "path"
