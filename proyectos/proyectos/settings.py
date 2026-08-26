@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 import os
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 load_dotenv()
 import dj_database_url
@@ -25,6 +26,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv("SECRET_KEY")
+# Sin SECRET_KEY, Django no puede firmar sesiones ni tokens CSRF. Antes quedaba
+# en None y el fallo aparecía después, lejos de su causa; mejor fallar al arrancar.
+if not SECRET_KEY:
+    raise ImproperlyConfigured(
+        "Falta la variable de entorno SECRET_KEY. Defínela en proyectos/.env "
+        "(local) o en las variables del servicio (despliegue)."
+    )
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
@@ -183,15 +191,62 @@ STATICFILES_DIRS = [
 # Carpeta donde collectstatic reúne los estáticos para que WhiteNoise los sirva.
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+# Orígenes adicionales de confianza para CSRF. Solo hacen falta para peticiones
+# de OTRO origen: Django ya acepta el origen propio de la petición, por eso la
+# app funciona en su dominio aunque este no aparezca aquí. Formato
+# "esquema://host", SIN barra final. Se configuran por entorno para no tener que
+# tocar el código cada vez que cambia el dominio.
 CSRF_TRUSTED_ORIGINS = [
-    "https://chase-nondrinkable-editorially.ngrok-free.dev",
-    "https://banco-de-proyectos-ope-production.up.railway.app",
+    o.strip() for o in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()
 ]
 
 # Railway (y otros PaaS) terminan el TLS en su proxy y reenvían al contenedor por
 # HTTP. Esto le dice a Django que la petición original era HTTPS, para que las
 # comprobaciones de seguridad (CSRF, cookies, is_secure) usen el esquema correcto.
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+
+# --------------------------------------------------------------------------- #
+# Endurecimiento HTTPS
+# --------------------------------------------------------------------------- #
+# Todo esto se apaga con HTTPS_ESTRICTO=0, que es lo que hace falta para correr
+# en local por HTTP: con las cookies marcadas Secure el navegador no las envía
+# por HTTP y no se puede ni iniciar sesión, y SECURE_SSL_REDIRECT provocaría un
+# bucle de redirecciones.
+HTTPS_ESTRICTO = os.getenv("HTTPS_ESTRICTO", "1") == "1"
+
+# Las cookies de sesión y de CSRF solo viajan por HTTPS (nunca en claro).
+SESSION_COOKIE_SECURE = HTTPS_ESTRICTO
+CSRF_COOKIE_SECURE = HTTPS_ESTRICTO
+
+# La cookie de sesión no se expone a JavaScript (mitiga el robo vía XSS).
+SESSION_COOKIE_HTTPONLY = True
+
+# No enviar las cookies en peticiones cross-site (mitiga CSRF).
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
+
+# Redirigir HTTP -> HTTPS. Funciona detrás del proxy gracias a
+# SECURE_PROXY_SSL_HEADER, definido arriba.
+SECURE_SSL_REDIRECT = HTTPS_ESTRICTO
+
+# HSTS: le indica al navegador que use HTTPS siempre para este dominio.
+# OJO: el navegador RECUERDA esta cabecera durante todo el tiempo indicado, y no
+# hay forma de retirársela a quien ya la recibió. Por eso arranca en 1 hora: si
+# algo sale mal se corrige en una hora y no en un año. Una vez verificado que el
+# sitio va bien por HTTPS, subir a 31536000 (un año) vía SECURE_HSTS_SECONDS.
+# No se activan includeSubDomains ni preload: afectarían a dominios vecinos y
+# son todavía más difíciles de revertir.
+SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "3600")) if HTTPS_ESTRICTO else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+SECURE_HSTS_PRELOAD = False
+
+# No filtrar la URL completa como Referer hacia sitios externos.
+SECURE_REFERRER_POLICY = "same-origin"
+
+# Impedir que el navegador adivine el tipo de contenido de un archivo servido
+# (relevante porque la plataforma sirve documentos subidos por usuarios).
+SECURE_CONTENT_TYPE_NOSNIFF = True
 
 # Media files (archivos subidos por los formuladores)
 MEDIA_URL = 'media/'

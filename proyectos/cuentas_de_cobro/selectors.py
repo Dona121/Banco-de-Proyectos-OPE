@@ -132,6 +132,11 @@ def puede_marcar_documentos(user, cuenta):
     if cuenta.estado_supervisor == _AP:
         return False
     if cuenta.fecha_radicacion is None:
+        # Un rechazo definitivo en radicación cierra la cuenta: no tiene sentido
+        # seguir cambiando el estado de sus documentos. Y antes de que el
+        # contratista entregue tampoco hay nada que revisar.
+        if services.radicacion_rechazada(cuenta) or not services.entrega_enviada(cuenta):
+            return False
         return rol_aprueba_radicacion(user)
     return any(puede_revisar(user, a) for a in asignaciones_activas_de(user, cuenta))
 

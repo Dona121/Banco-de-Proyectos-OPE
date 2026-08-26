@@ -91,12 +91,17 @@ class CuentaCreateView(ContratistaRequeridoMixin, CreateView):
     form_class = CuentaForm
 
     def form_valid(self, form):
-        cuenta = services.crear_cuenta(
-            usuario=self.request.user,
-            vigencia=form.cleaned_data["vigencia"],
-            mes=form.cleaned_data["mes"],
-            comentario=form.cleaned_data["comentario"],
-        )
+        try:
+            cuenta = services.crear_cuenta(
+                usuario=self.request.user,
+                vigencia=form.cleaned_data["vigencia"],
+                mes=form.cleaned_data["mes"],
+                comentario=form.cleaned_data["comentario"],
+            )
+        except ValidationError as exc:
+            # P. ej. ya existe una cuenta para esa vigencia y mes.
+            form.add_error(None, exc)
+            return self.form_invalid(form)
         messages.success(
             self.request, "Cuenta creada. Ahora carga los documentos obligatorios."
         )
@@ -246,7 +251,9 @@ class DocumentoCargarView(ContratistaRequeridoMixin, _AccionCuentaMixin):
 class EntregarView(ContratistaRequeridoMixin, _AccionCuentaMixin):
     def post(self, request, pk):
         cuenta = self.get_cuenta(request, pk)
-        _exigir(selectors.puede_cargar_documentos(request.user, cuenta))
+        # `puede_entregar`, no `puede_cargar_documentos`: además de ser el dueño
+        # exige que el paquete esté completo y que la versión no se haya enviado ya.
+        _exigir(selectors.puede_entregar(request.user, cuenta))
         try:
             services.entregar(cuenta, request.user)
             messages.success(request, "Documentos enviados a revisión.")
