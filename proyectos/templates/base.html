@@ -11,28 +11,19 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Open+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
 
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            brand: { DEFAULT: '#109d39', dark: '#0c7d2d', darker: '#095e22', light: '#e7f6ec', 50: '#f0faf3' },
-            azul:  { DEFAULT: '#0b72ab', light: '#e6f1f7' },
-            rojo:  { DEFAULT: '#d92a34', light: '#fbe9ea' },
-            ambar: { DEFAULT: '#ffa700', light: '#fff4e0' },
-          },
-          fontFamily: {
-            sans: ['"Open Sans"', 'system-ui', 'sans-serif'],
-            head: ['Montserrat', 'system-ui', 'sans-serif'],
-          },
-        }
-      }
-    }
-  </script>
+  {% comment %}
+  Tailwind compilado, NO el CDN. `cdn.tailwindcss.com` no es una hoja de estilos:
+  es el compilador de Tailwind, ~400 KB de JavaScript que generan el CSS en el
+  navegador en cada carga. En un telefono con datos moviles eso se traducia en la
+  pagina sin estilos. Ahora el CSS se compila una vez (ver proyectos/tailwind.config.js)
+  y WhiteNoise lo sirve versionado y cacheado: ~27 KB en vez de 400 KB de JS.
+  Tras cambiar clases en las plantillas hay que regenerarlo y correr collectstatic.
+  {% endcomment %}
+  <link rel="stylesheet" href="{% static 'web/tailwind.css' %}">
   <link rel="stylesheet" href="{% static 'web/app.css' %}">
   <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+  {% comment %}Alpine con version fija: `3.x.x` es flotante y cualquier release rompia la app sin tocar el codigo.{% endcomment %}
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.16.3/dist/cdn.min.js" defer></script>
 </head>
 <body class="h-full bg-slate-50 font-sans text-slate-700 antialiased">
   {% block body %}{% endblock %}

@@ -1,0 +1,5 @@
+/* Entrada del compilador de Tailwind. El resultado se genera en
+   static/web/tailwind.css (ver tailwind.config.js). No editar el generado. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
