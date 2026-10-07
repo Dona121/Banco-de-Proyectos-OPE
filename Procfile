@@ -4,7 +4,7 @@
 # el PDF de un reporte, por ejemplo) deja la plataforma sin responder a todos los
 # demás mientras dura.
 # `--timeout 120`: margen para esas mismas operaciones. Las subidas de archivos ya
-# no lo necesitan —van directas al bucket, sin pasar por aquí—, pero con 30
+# no lo necesitan (van directas al bucket, sin pasar por aquí), pero con 30
 # segundos (el valor de serie) cualquier reporte grande moría a medias.
 #
 # NO incluye `migrate`: hoy las migraciones se aplican a mano. Ver docs/Pendientes.md.

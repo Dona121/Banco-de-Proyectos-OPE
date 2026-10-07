@@ -29,6 +29,11 @@ proyectos/media/
 # saca del repo: hay que borrarlo).
 main.py
 
+# Instrucciones para Claude Code. Es una herramienta de trabajo local, no parte
+# del producto: queda en el disco de quien la use, no en el repositorio. La
+# documentación del proyecto vive en docs/.
+CLAUDE.md
+
 # --------------------------------------------------------------------------- #
 # Sistema operativo / editores
 # --------------------------------------------------------------------------- #
