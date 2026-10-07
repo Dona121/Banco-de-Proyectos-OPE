@@ -1,0 +1,35 @@
+{% extends "admin/base_site.html" %}
+{% comment %}
+Confirmación de un borrado destructivo. El admin de Django trae la suya, pero
+aquí no sirve: estas acciones retiran a propósito cosas que el modelo protege
+con PROTECT, así que hay que enseñar lo que se va a llevar por delante, que no
+es solo lo seleccionado.
+{% endcomment %}
+
+{% block content %}
+<h1>{{ titulo }}</h1>
+
+<p style="max-width:70ch">{{ advertencia }}</p>
+
+<ul style="max-width:70ch">
+  {% for linea in detalle %}
+  <li>{{ linea }}</li>
+  {% empty %}
+  <li>No hay nada asociado.</li>
+  {% endfor %}
+</ul>
+
+<p style="max-width:70ch"><strong>Esto no se puede deshacer.</strong>
+Los archivos asociados también se retiran del almacenamiento.</p>
+
+<form method="post">
+  {% csrf_token %}
+  {% for obj in objetos %}
+  <input type="hidden" name="_selected_action" value="{{ obj.pk }}">
+  {% endfor %}
+  <input type="hidden" name="action" value="{{ accion }}">
+  <input type="hidden" name="confirmado" value="1">
+  <input type="submit" value="Sí, eliminar definitivamente" class="default">
+  <a href="." class="button cancel-link" style="margin-left:.5rem">Cancelar</a>
+</form>
+{% endblock %}

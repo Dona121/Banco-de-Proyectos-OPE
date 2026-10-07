@@ -508,6 +508,282 @@ Siguen abiertos:
    repitió el barrido sobre los 123 archivos de texto del proyecto: quedaba **una**
    frase dañada en `CLAUDE.md`, ya reparada, y los dos únicos avisos restantes son
    falsos positivos dentro del bundle minificado de Alpine.
+### Cuatro ajustes del 2026-10-07 (plan aprobado)
+
+14. **La entrega tiene un momento de cierre: botón "Realizar entrega".** Reportado
+    por el usuario: *"hoy el usuario puede hacer entregas simultáneas e incluso
+    cargar documentos a entregas pasadas"*. La causa era que `crear_entrega` ponía
+    la actividad En revisión en el mismo acto de crear la versión, así que abrir y
+    entregar eran lo mismo. Comprobado en la base local antes de tocar nada: la
+    actividad 4 tenía **tres entregas sin revisar a la vez**.
+
+    Ahora son dos tiempos: abrir la versión (borrador, solo la ve su autor, la
+    actividad sigue Pendiente) y **realizarla** (exige al menos un documento, pasa
+    a En revisión y congela el paquete). Solo hay un borrador abierto por
+    actividad, y se reabre únicamente con "Requiere ajustes", como una versión
+    nueva.
+
+    **Sin tocar el modelo**, que es definitivo: el estado se deriva en
+    `web/selectors.py` (`entrega_enviada`, `borrador_de`, `puede_documentar`,
+    `puede_realizar_entrega`). Una entrega está enviada si tiene revisión o si es
+    la vigente de una actividad En revisión; una versión que no es la vigente
+    siempre tiene revisión, así que la regla cierra sola. Eso ordena de paso los
+    datos heredados: las entregas simultáneas que no son la última quedan
+    **reemplazadas**, ni editables ni revisables, sin migración de datos.
+
+    La guarda que importa está en el **servidor**, no en la plantilla: los cuatro
+    puntos de `views.py` que repetían el criterio a mano pasan a
+    `selectors.puede_documentar`, incluidos los dos endpoints de subida directa.
+    Esconder el botón no habría impedido un POST.
+
+15. **La revisión pasa a tener dos salidas.** "Rechazada" hacía exactamente lo
+    mismo que "Requiere ajustes" (dejar la actividad para corregir) y confundía.
+    Retirada del formulario, del servicio y del admin. **Sigue en el modelo**
+    (`contenido/models.py` es definitivo) y se conserva su estilo en
+    `RESULTADO_CLASE`, para que las revisiones históricas que la tengan se sigan
+    pintando.
+
+16. **Entregar detiene el reloj del vencimiento.** Una actividad En revisión o
+    Aprobada ya no se marca vencida aunque su fecha haya pasado, se haya entregado
+    a tiempo o tarde. Si la devuelven, vuelve a contar. Eran cuatro sitios con la
+    misma condición incompleta (excluir solo Aprobada): el filtro `vencida`, las
+    métricas de los paneles (`ESTADOS_SIN_PLAZO`), los avisos de plazo de la
+    campana y una condición suelta (`dr < 0`) en el panel de formulador, que se
+    había escapado del filtro.
+
+    De paso, los dos accesos directos a "nueva entrega" del panel de formulador
+    apuntaban a `entrega_nueva` sin comprobar permiso: con un borrador abierto
+    habrían dado 403. Ahora llevan al detalle de la actividad, que decide qué
+    ofrecer.
+
+17. **Extensiones de archivo administrables.** Eran un `frozenset` en el código.
+    Ahora `cuentas.models.ExtensionArchivo`, editable desde el panel, sembrado con
+    las 12 de siempre en una migración de datos. El validador lee las activas con
+    caché de proceso; **si la tabla queda vacía cae al conjunto del código**, para
+    que un borrado accidental no deje la plataforma sin poder subir nada.
+
+    ⚠️ **Primera migración desde que se documentó que `migrate` no está en el
+    arranque de Railway.** Hay que aplicarla a mano, o añadirla al comando.
+
+    Dos defectos que solo aparecieron al escribir las pruebas, los dos reales:
+
+    - **El receptor de señal se recolectaba.** Estaba definido dentro de
+      `ready()`, y Django conecta con referencia débil: al terminar `ready()` la
+      función se recolecta y la señal deja de llegar **sin ningún aviso**. La
+      caché nunca se invalidaba, así que activar o desactivar una extensión desde
+      el panel no surtía efecto. Movido al nivel del módulo, como
+      `_limpiar_cache_de_roles`.
+    - **"No enviada" no es lo mismo que "borrador".** Una versión reemplazada por
+      otra posterior tampoco está enviada, y `puede_documentar` la dejaba
+      editable. Ahora exige ser **el** borrador abierto, no solo no estar enviada.
+
+18. **Dos notificaciones rotas** por la limpieza del guion largo
+    (`web/services.py`): *"Actividad asignada: realízala y entrégala ({nombre}"* y
+    *"...vuelve a entregar) {nombre}"*. Eran los dos únicos casos que quedaban;
+    el barrido anterior no los vio porque contaba paréntesis **por bloque**, y un
+    `(` en una cadena y un `)` en la siguiente se compensaban. El barrido nuevo
+    recorre los literales de cadena con AST, uno a uno.
+
+    Método para repetirlo: `ast.walk` sobre cada archivo, mirando `ast.Constant`
+    y la parte literal de cada `ast.JoinedStr` (f-string), y comparando `(` con
+    `)` dentro de cada cadena de una sola línea.
+
+**Suite: 229 pruebas** (eran 207). Clases nuevas en `web/tests.py`:
+`RealizarEntregaTest`, `RevisionSinRechazoTest`, `VencimientoTest` y
+`ExtensionesParametrizablesTest`. El andamiaje `ReglaBBaseTest._entrega` ahora
+hace los dos pasos (abre y realiza) y se añadió `_borrador` para las pruebas que
+necesitan una entrega a medias.
+
+### Sondeo adversarial del 2026-10-07: dónde cedía la lógica
+
+El usuario preguntó si la suite cubría todos los casos. No los cubría: probaba
+los caminos buenos. Se escribieron dos módulos que **atacan**, saltándose la
+vista y llamando al servicio o al modelo directamente, que es lo que haría el
+admin, un comando, una tarea futura o dos peticiones simultáneas:
+`web/test_invariantes.py` y `cuentas_de_cobro/tests/test_invariantes.py`.
+
+**Seis pruebas nacieron fallando, y las seis eran defectos reales.** Todas del
+mismo patrón: *la regla vivía en la vista y el servicio aceptaba cualquier cosa*,
+justo lo contrario de lo que dice la arquitectura.
+
+| Lo que se pudo hacer | Dónde faltaba la guarda |
+|---|---|
+| Revisar un borrador que su autor no había entregado | `web.services.registrar_revision` |
+| Revisar dos veces la misma entrega (doble envío) | ídem, y `IntegrityError` salía como 500 |
+| Revisar una versión ya reemplazada | ídem |
+| **Revisarse a uno mismo** su propia entrega | `selectors.puede_revisar` |
+| Abrir una segunda entrega con una ya en revisión | `web.services.crear_entrega` |
+| Crear una cuenta de cobro con **mes 0, 13 o -1** | `cuentas_de_cobro.services.crear_cuenta` |
+
+El del mes merece una nota: `CuentaEntrega.mes` **sí** declara `choices`, pero el
+modelo no llama a `full_clean()` en su `save()`, y las `choices` de Django son
+validación de formulario, no restricción de base. El formulario lo impedía; el
+servicio no.
+
+El de la autorrevisión es alcanzable sin hacer nada raro: basta con que quien
+ejecuta la actividad sea también el director del proyecto, y entonces
+`responsable_revision` lo devuelve a él mismo. La guarda se puso **por encima del
+atajo de superusuario**: separar quien hace de quien aprueba es la razón de ser
+de ese paso.
+
+**Lo que aguantó sin un rasguño:**
+
+- **Referencia directa a objetos** (cambiar el id en la URL): siete intentos de
+  ver, descargar, borrar, subir, entregar y revisar cosas de otro proyecto, todos
+  rechazados. Los selectores hacen su trabajo.
+- El gating secuencial de cuentas de cobro (nadie se adelanta al técnico), el
+  rechazo terminal en radicación, la coherencia entre documentos y decisión, el
+  tope de una cuenta por periodo, y no entregar dos veces.
+- Saneado de nombres de archivo: ni `../../etc/passwd.pdf` ni `/abs/ruta.pdf` ni
+  rutas con contrabarra escapan del prefijo; `factura.pdf.exe` se rechaza.
+- `ExtensionArchivo` no admite `tar.gz`, separadores de ruta, vacíos, ni
+  duplicados por diferencia de mayúsculas.
+
+**Suite: 274 pruebas** (eran 229).
+
+#### Lo que sigue SIN cubrir, dicho sin adornos
+
+- ⚠️ **La concurrencia no está probada.** Se añadió `select_for_update` en
+  `crear_entrega`, `realizar_entrega` y ya estaba en cuentas de cobro, pero
+  **SQLite no implementa el bloqueo de filas** (`has_select_for_update = False`),
+  así que en las pruebas la cláusula se omite en silencio. Los bloqueos solo
+  actúan en Postgres, es decir en producción, y ahí **nadie los ha verificado**.
+  Probarlo de verdad exige dos conexiones reales contra Postgres.
+- ~~**Escribir el modelo directamente salta todas las guardas**~~: **resuelto en
+  parte el 2026-10-07**, a petición del usuario, y conviene entender hasta dónde.
+
+  Se añadieron **dos capas por debajo de los servicios**, sin tocar los
+  `models.py` definitivos:
+
+  1. **Señal `pre_save` → `full_clean()`** en `contenido/apps.py` y
+     `cuentas_de_cobro/apps.py`, para `Actividades` y `CuentaEntrega`. Los dos
+     declaraban un `clean()` con un invariante real y **ninguno sobrescribe
+     `save()`**, así que esas reglas solo corrían vía formulario: estaban
+     escritas y apagadas. Cubre todo lo que pase por el ORM; no cubre
+     `bulk_create`, `queryset.update()` ni el SQL crudo.
+  2. **Restricciones `CHECK` en la base** por migración, solo para lo
+     incondicional: `actividad_fechas_coherentes`, `entrega_version_positiva` y
+     `cuenta_mes_valido`. Con `SeparateDatabaseAndState`, de modo que el estado
+     de migraciones no las registra y `makemigrations --check` no detecta
+     divergencia (comprobado). **Comprobado también que rechazan un UPDATE de
+     SQL crudo**, que es justo lo que las otras dos capas no pueden parar.
+
+  **Lo que NO se bajó, y es deliberado:** las reglas de flujo (una sola entrega
+  abierta, nadie revisa lo suyo, el orden de los revisores, la coherencia entre
+  documentos y decisión) dependen de otras tablas y de quién actúa. Un `CHECK`
+  solo ve su propia fila y un modelo no sabe quién está guardando: no caben ahí,
+  y forzarlas sería empeorarlas. Se quedan en los servicios, que es su sitio.
+
+  Medición previa al cambio: encender `full_clean()` en cada guardado **no rompió
+  nada del producto**; los únicos 6 fallos fueron de un andamiaje de prueba que
+  creaba actividades con el vencimiento anterior a la fecha programada, es decir
+  la validación atrapando datos imposibles que la propia suite generaba.
+
+  Sigue en pie que una operación en lote o el SQL crudo esquivan las capas 1 y 2;
+  para eso está la 3, limitada a lo que se puede expresar en una sola fila.
+- **Reenvío del mismo token de subida** (`confirmar_subida`): el token va firmado
+  pero no se marca como usado, así que reenviarlo crearía una segunda fila
+  apuntando al mismo archivo del bucket. No se pudo probar porque el paso exige
+  `head_object` contra el bucket real y las pruebas usan almacenamiento en
+  memoria. Riesgo bajo (duplica una fila, no filtra nada), pero está abierto.
+- No hay pruebas de propiedades ni *fuzzing*; las entradas probadas son las que
+  se eligieron a mano.
+
+### Dos huecos cerrados el 2026-10-07 (reportados por el usuario)
+
+19. **El admin subía archivos sin validar.** Preguntando si el modelo de
+    extensiones regía en todos los campos de carga, resultó que no: los cuatro
+    puntos de la aplicación sí (formulario con `ArchivoValidadoMixin` y los dos
+    endpoints de firma con `validar_extension`), pero el **Django Admin no**.
+    Sus formularios se generan solos y no heredaban nada, así que desde ahí se
+    podía subir un ejecutable o un archivo de 5 GB, saltándose la lista de
+    extensiones y el tope de tamaño. Eran seis puntos: `DocumentosAdmin`,
+    `TramiteFinalAdmin` y cuatro inlines.
+
+    Resuelto con `ArchivoValidadoAdminMixin` y `ArchivoValidadoInlineMixin`
+    (`cuentas/validadores.py`), que envuelven el formulario que el admin
+    construye. La prueba `ExtensionesEnTodoPuntoDeCargaTest` **recorre
+    `admin.site._registry`** y falla si aparece cualquier modelo o inline con
+    `FileField` sin la validación: registrar algo nuevo no puede reabrir el
+    hueco en silencio.
+
+20. **Las páginas se quedaban guardadas en el navegador.** Reportado como "el
+    proyecto 14 tiene 4 actividades pero la tarjeta dice 1". Se comprobó en
+    producción, en solo lectura, que **el dato y el código eran correctos**: las
+    4 actividades existían, el conteo daba 4 para los cinco usuarios implicados
+    (con filtro y sin él), y la página renderizada daba 4. El dato que lo cerró:
+    **ningún proyecto de la base tenía 1 actividad** en ese momento, así que
+    ninguna tarjeta podía mostrar ese número. Era una página de media hora
+    antes, de cuando solo existía la primera de las cuatro.
+
+    La causa real: las respuestas salían **solo con `Vary: Cookie`, sin
+    `Cache-Control`**. Sin instrucción explícita el navegador decide por su
+    cuenta cuánto considerarlas frescas, y con el botón "atrás" usa su copia sin
+    preguntar. Resuelto con `cuentas.middleware.SinCacheDeNavegador`, **después
+    de WhiteNoise** para que los estáticos conserven su caché larga, y
+    respetando la cabecera que una vista haya puesto a propósito.
+
+    Cierra además dos problemas peores que no se habían notado: tras cerrar
+    sesión, el botón "atrás" podía devolver pantallas con datos del usuario
+    anterior en un equipo compartido; y una página de formulario servida desde
+    la caché enviaba un token CSRF viejo, que responde 403 sin explicar nada.
+
+    Lección de método: el usuario reportó un número mal y la hipótesis natural
+    (el conteo está mal calculado) era falsa. Escribí la prueba que debía
+    demostrarla y **pasó**, lo cual evitó "arreglar" código que funcionaba. El
+    fallo estaba una capa más arriba, en cómo se entrega la página.
+
+**Suite: 284 pruebas.**
+
+### Borrado de datos de prueba (2026-10-07)
+
+21. **No se podían retirar las pruebas hechas en producción.** Dos causas
+    distintas que conviene no confundir:
+
+    - **El modelo protege a propósito**: nueve claves `PROTECT` hacia `User` y
+      `RevisionCuentaCobro.asignacion` hacia la asignación. Una cuenta de cobro
+      dice quién la presentó y quién la aprobó; ese nombre no debería poder
+      evaporarse. Resuelto con `cuentas/borrado.py`, explícito y acotado:
+      `eliminar_cuenta_con_rastro` y `eliminar_usuario_con_rastro`, expuestos
+      como acciones del admin **solo para superusuario** y con una pantalla de
+      confirmación que enumera lo que se va a llevar por delante. Para un
+      usuario que ya trabajó, la acción sana es **desactivarlo**, que está al
+      lado.
+    - **Los archivos se quedaban en el bucket**: borrar un proyecto sí
+      funcionaba, pero sus documentos seguían ahí, ocupando sitio y accesibles
+      con una URL firmada. Eso no era protección, era una fuga. Resuelto con un
+      receptor de `post_delete` que retira los `FileField` de la fila borrada en
+      `transaction.on_commit`, cascadas incluidas.
+
+    **Ejecutado en producción el 2026-10-07**, a petición del usuario: se
+    borraron las **4 cuentas de cobro de prueba** (pks 9, 10, 11 y 12, de
+    `ContratistaPrueba`, `MichelleguarinCT` y `Contratista`) con sus 66 archivos
+    asociados. Antes se verificó el inventario y se probó el borrado en una base
+    desechable. Los catálogos (1 vigencia, 7 tipos de documento, 6 requisitos)
+    quedaron intactos, que es lo que no había que tocar.
+
+22. **Limpieza de archivos huérfanos del bucket (2026-10-07).** Tras el borrado
+    quedaban restos anteriores al arreglo: subidas abandonadas (se firma el
+    permiso, el navegador sube y nadie confirma) y documentos borrados desde la
+    interfaz cuando el archivo todavía no se iba con la fila.
+
+    Se barrió el bucket entero desde la raíz y se contrastó contra **todos** los
+    campos de archivo del proyecto, recorriendo `apps.get_models()` en vez de
+    fiarse de los cuatro conocidos; se comprobó además que ningún nombre
+    apareciera en código ni plantillas (todas las URLs de media salen de campos
+    de la base). De 89 archivos, **10 referenciados y 79 huérfanos**, borrados.
+
+    Verificación posterior: 10 archivos en el bucket, 10 referenciados,
+    **0 referenciados faltantes**. La lista de lo borrado quedó registrada.
+
+    Entre los restos había archivos en la **raíz** del bucket, sin prefijo de
+    carpeta: vienen de cuando las pruebas escribían contra el almacenamiento de
+    producción, el problema que resolvió `proyectos/test_settings.py`. Uno
+    (`x.pdf`) lo generó esta misma sesión al probar el borrado en una base
+    desechable: la base era aparte, pero el `.env` seguía apuntando al bucket
+    real. **Aislar la base no aísla el almacenamiento**, y es un tropiezo fácil
+    de repetir.
+
 ### Regla de negocio corregida (reportada por el usuario al probar la app)
 
 La validación de "una cuenta por vigencia y mes" solo miraba si la cuenta

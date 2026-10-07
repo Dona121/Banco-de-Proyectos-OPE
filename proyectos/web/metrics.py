@@ -40,27 +40,50 @@ def _distribucion_estado(actividades):
     return segmentos, total
 
 
+def _entregada_el(entrega):
+    """Cuándo se realizó la entrega, no cuándo se abrió el borrador.
+
+    Desde que entregar es un acto aparte, el ejecutor puede tener una versión
+    abierta días antes de enviarla. Medir desde `fecha_creacion` le cargaría al
+    revisor un retraso que no es suyo: la entrega le llegó hoy.
+
+    `realizar_entrega` guarda la entrega, así que `fecha_actualizacion` (de
+    `Fechas`, con `auto_now`) marca ese momento. Es lo más cercano a una fecha
+    de envío sin tocar el modelo, que es definitivo.
+    """
+    return entrega.fecha_actualizacion or entrega.fecha_creacion
+
+
 def _pendientes_revision(entregas, ahora):
-    """Entregas sin Revisión asociada, con su antigüedad en días."""
+    """Entregas ya realizadas y sin revisar, con los días que llevan esperando.
+
+    El queryset llega de `selectors.entregas_por_revisar`, que ya excluye los
+    borradores y las versiones reemplazadas.
+    """
     pend = (
-        entregas.filter(revisiones__isnull=True)
-        .select_related("actividad", "actividad__proyecto",
-                        "actividad__proyecto__asignado_a", "usuario")
-        .order_by("fecha_creacion")
+        entregas.select_related("actividad", "actividad__proyecto",
+                                "actividad__proyecto__asignado_a", "usuario")
+        .order_by("fecha_actualizacion")
     )
     filas = []
     for e in pend:
-        dias = (ahora - e.fecha_creacion).days
+        dias = (ahora - _entregada_el(e)).days
         filas.append({"entrega": e, "dias": dias, "atrasada": dias >= UMBRAL_ATRASO})
     return filas
 
 
+# Entregar detiene el reloj: una actividad En revisión no está vencida ni por
+# vencer, aunque su fecha haya pasado. Misma regla que el filtro `vencida` de
+# `web_extras`; si cambia una, cambia la otra.
+ESTADOS_SIN_PLAZO = (Estado.EN_REVISION, Estado.APROBADA)
+
+
 def _proximas_y_vencidas(actividades, ahora):
-    vencidas = actividades.filter(fecha_vencimiento__lt=ahora).exclude(estado=Estado.APROBADA)
+    pendientes = actividades.exclude(estado__in=ESTADOS_SIN_PLAZO)
+    vencidas = pendientes.filter(fecha_vencimiento__lt=ahora)
     proximas = (
-        actividades.filter(fecha_vencimiento__gte=ahora,
-                           fecha_vencimiento__lte=ahora + timezone.timedelta(days=7))
-        .exclude(estado=Estado.APROBADA)
+        pendientes.filter(fecha_vencimiento__gte=ahora,
+                          fecha_vencimiento__lte=ahora + timezone.timedelta(days=7))
         .order_by("fecha_vencimiento")
     )
     return proximas, vencidas
@@ -93,9 +116,11 @@ def director(user):
             coord[cid]["actividades"] = row["c"]
     backlog = (
         ActividadEntrega.objects.filter(
-            revisiones__isnull=True, actividad__proyecto__in=proyectos
+            revisiones__isnull=True, actividad__proyecto__in=proyectos,
+            # Solo lo entregado: un borrador abierto es trabajo del ejecutor,
+            # no carga pendiente del coordinador.
+            actividad__estado=Estado.EN_REVISION,
         )
-        .exclude(actividad__estado=Estado.APROBADA)
         .exclude(actividad__asignado_a__groups__name=COORDINADOR)
         .values("actividad__proyecto__asignado_a")
         .annotate(c=Count("id"))
@@ -155,7 +180,9 @@ def coordinador(user):
     # Tiempo promedio de revisión (revisión.fecha_creacion - entrega.fecha_creacion).
     dur = revisiones.annotate(
         delta=ExpressionWrapper(
-            F("fecha_creacion") - F("actividad_entrega__fecha_creacion"),
+            # Desde que se entregó (ver `_entregada_el`), no desde que se abrió
+            # el borrador: si no, el promedio incluye lo que tardó el ejecutor.
+            F("fecha_creacion") - F("actividad_entrega__fecha_actualizacion"),
             output_field=DurationField(),
         )
     ).aggregate(prom=Avg("delta"))["prom"]
@@ -237,7 +264,12 @@ def formulador(user):
     segmentos, total_act = _distribucion_estado(actividades)
 
     counts = {r["estado"]: r["c"] for r in actividades.values("estado").annotate(c=Count("id"))}
-    sin_entrega = actividades.filter(actividadentrega__isnull=True)
+    # Pendientes de entregar. Antes era "sin ninguna fila de entrega", pero
+    # desde que abrir la versión y entregarla son dos actos, una actividad con
+    # un borrador abierto tiene fila y seguía sin estar entregada: desaparecía
+    # de la lista de tareas de quien la tenía a medias. El estado PENDIENTE
+    # significa exactamente eso: nada enviado todavía.
+    sin_entrega = actividades.filter(estado=Estado.PENDIENTE)
 
     # Agrupación por proyecto.
     por_proyecto = list(
@@ -246,8 +278,16 @@ def formulador(user):
     )
     max_proyecto = max((x["c"] for x in por_proyecto), default=0)
 
-    ultima = entregas.order_by("-fecha_creacion").first()
-    dias_ultima = (ahora - ultima.fecha_creacion).days if ultima else None
+    # La última entrega REALIZADA: un borrador abierto no es una entrega hecha.
+    ultima = (
+        entregas.filter(
+            Q(revisiones__isnull=False)
+            | Q(actividad__estado__in=(Estado.EN_REVISION, Estado.APROBADA))
+        )
+        .order_by("-fecha_actualizacion")
+        .first()
+    )
+    dias_ultima = (ahora - _entregada_el(ultima)).days if ultima else None
 
     return {
         "rol_dashboard": "Formulador",

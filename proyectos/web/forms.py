@@ -140,11 +140,23 @@ class DocumentoForm(ArchivoValidadoMixin, EstilizadoMixin, forms.ModelForm):
         widgets = {"nombre": forms.TextInput()}
 
 
+# Dos salidas, no tres. "Rechazada" sigue existiendo en el modelo, que es
+# definitivo, pero hacía exactamente lo mismo que "Requiere ajustes" (dejar la
+# actividad para corregir) y tener dos nombres para una sola cosa confundía a
+# quien revisa. El servicio también la rechaza, por si llega por otra vía.
+RESULTADOS_DE_REVISION = [
+    (Revisiones.ResultadoRevision.APROBADA.value,
+     Revisiones.ResultadoRevision.APROBADA.label),
+    (Revisiones.ResultadoRevision.AJUSTES.value,
+     Revisiones.ResultadoRevision.AJUSTES.label),
+]
+
+
 class RevisionForm(EstilizadoMixin, forms.Form):
     """Plano: el servicio crea y valida la Revisión y actualiza el estado."""
 
     resultado = forms.ChoiceField(
-        label="Resultado", choices=Revisiones.ResultadoRevision.choices
+        label="Resultado", choices=RESULTADOS_DE_REVISION
     )
     comentario = forms.CharField(
         label="Observaciones",

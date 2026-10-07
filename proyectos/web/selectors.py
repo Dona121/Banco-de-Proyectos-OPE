@@ -4,7 +4,7 @@ Centralizan la regla "un usuario nunca ve información que no le corresponda".
 Las vistas SIEMPRE deben partir de estas funciones, nunca de ``Model.objects``.
 """
 from django.contrib.auth import get_user_model
-from django.db.models import Count, Q
+from django.db.models import Count, F, OuterRef, Q, Subquery
 
 from contenido.models import Actividades, ActividadEntrega, Proyectos, Revisiones
 from cuentas.roles import roles_de, CONSULTA, DIRECTOR, COORDINADOR, FORMULADOR
@@ -144,11 +144,98 @@ def revisiones_visibles(user):
 # --------------------------------------------------------------------------- #
 # Permisos a nivel de objeto (defensa adicional en las vistas de acción)
 # --------------------------------------------------------------------------- #
-def puede_crear_entrega(user, actividad):
-    """El ejecutor asignado puede entregar si la actividad no está aprobada."""
-    if actividad.estado == Actividades.EstadoActividad.APROBADA:
+# --------------------------------------------------------------------------- #
+# Estado de una entrega: borrador o enviada
+# --------------------------------------------------------------------------- #
+# Una entrega no tenía momento de cierre: crearla mandaba la actividad a revisión
+# en el acto, así que se podían abrir varias versiones a la vez y seguir
+# adjuntando documentos a una que el revisor ya estaba mirando. Ahora crear la
+# versión y entregarla son dos actos distintos, y esa diferencia se DERIVA de lo
+# que ya existe (`contenido/models.py` es definitivo y no se toca):
+#
+#   | Estado actividad | Versión vigente   | Resultado            |
+#   |------------------|-------------------|----------------------|
+#   | Pendiente        | sin revisión      | borrador (editable)  |
+#   | En revisión      | sin revisión      | enviada (congelada)  |
+#   | Requiere ajustes | con revisión      | enviada (la devuelta)|
+#   | Requiere ajustes | sin revisión      | borrador (la nueva)  |
+#   | Aprobada         | con revisión      | enviada              |
+#
+# La regla cierra sola, sin casos especiales, porque una versión que no es la
+# vigente SIEMPRE tiene revisión: es la única forma de que naciera la siguiente.
+# De paso deja bien las entregas simultáneas que creó el flujo anterior: las que
+# no son la vigente quedan como reemplazadas, ni editables ni revisables.
+def entrega_vigente(actividad):
+    """La última versión de la actividad (o None si no hay ninguna)."""
+    return (
+        actividad.actividadentrega_set.order_by("-numero_version").first()
+    )
+
+
+def entrega_enviada(entrega):
+    """True si la entrega ya salió de las manos de quien la hizo."""
+    if hasattr(entrega, "revisiones"):
+        return True  # revisada: enviada con seguridad (OneToOne)
+    if entrega.actividad.estado != Actividades.EstadoActividad.EN_REVISION:
         return False
-    return user.is_superuser or actividad.asignado_a_id == user.id
+    vigente = entrega_vigente(entrega.actividad)
+    return vigente is not None and vigente.pk == entrega.pk
+
+
+def borrador_de(actividad):
+    """La versión abierta de la actividad, si la hay: la vigente sin enviar."""
+    vigente = entrega_vigente(actividad)
+    if vigente is None or entrega_enviada(vigente):
+        return None
+    return vigente
+
+
+def puede_documentar(user, entrega):
+    """Adjuntar, quitar o subir documentos: el dueño, mientras sea borrador.
+
+    Pulsar "Realizar entrega" congela el paquete. Mientras esto no se comprobaba,
+    el ejecutor podía seguir cambiando los documentos de una entrega que el
+    revisor ya tenía delante.
+    """
+    # Una actividad aprobada cierra el expediente, incluso si esa versión no
+    # llegó a tener revisión propia: los documentos que respaldan la aprobación
+    # no se tocan. Sin esta guarda, una versión suelta de una actividad ya
+    # aprobada se comportaría como borrador.
+    if entrega.actividad.estado == Actividades.EstadoActividad.APROBADA:
+        return False
+    if not (user.is_superuser or entrega.usuario_id == user.id):
+        return False
+    # Tiene que ser EL borrador abierto, no solo "no enviada": una versión
+    # reemplazada por otra posterior tampoco está enviada, y dejarla editable
+    # sería seguir tocando una versión que ya nadie va a mirar.
+    borrador = borrador_de(entrega.actividad)
+    return borrador is not None and borrador.pk == entrega.pk
+
+
+def puede_realizar_entrega(user, entrega):
+    """Enviar la entrega a revisión: el dueño, con al menos un documento.
+
+    Una entrega vacía es trabajo perdido para los dos: el revisor solo puede
+    devolverla y el ciclo reinicia desde cero.
+    """
+    if not puede_documentar(user, entrega):
+        return False
+    return entrega.documentos_set.exists()
+
+
+def puede_crear_entrega(user, actividad):
+    """Abrir una versión nueva: el ejecutor asignado, si no hay otra abierta.
+
+    Solo cuando la actividad está Pendiente (aún no ha entregado nada) o en
+    Requiere ajustes (se la devolvieron). Con una entrega en revisión no se abre
+    otra, que es lo que permitía las entregas simultáneas.
+    """
+    Estado = Actividades.EstadoActividad
+    if actividad.estado not in (Estado.PENDIENTE, Estado.AJUSTES):
+        return False
+    if not (user.is_superuser or actividad.asignado_a_id == user.id):
+        return False
+    return borrador_de(actividad) is None
 
 
 def puede_editar_actividad(user, actividad):
@@ -190,12 +277,21 @@ def responsable_revision(actividad):
 
 
 def puede_revisar(user, entrega):
-    """Revisa quien determine ``responsable_revision``, si la actividad no está
-    aprobada y la entrega aún no tiene revisión."""
+    """Revisa quien determine ``responsable_revision``, sobre una entrega que de
+    verdad se entregó y todavía no tiene revisión."""
     if entrega.actividad.estado == Actividades.EstadoActividad.APROBADA:
         return False
     if hasattr(entrega, "revisiones"):
         return False  # ya tiene revisión (OneToOne)
+    if not entrega_enviada(entrega):
+        return False  # borrador: el ejecutor aún no ha pulsado "Realizar entrega"
+    # Nadie revisa su propia entrega, ni siquiera el administrador. Es alcanzable
+    # sin hacer nada raro: basta con que quien ejecuta la actividad sea también
+    # el director del proyecto, y entonces `responsable_revision` lo devuelve a
+    # él mismo. Separar quien hace de quien aprueba es la razón de ser de este
+    # paso, así que esta guarda va por encima del atajo de superusuario.
+    if entrega.usuario_id == user.id:
+        return False
     if user.is_superuser:
         return True
     return responsable_revision(entrega.actividad).id == user.id
@@ -212,8 +308,24 @@ def entregas_por_revisar(user):
         ActividadEntrega.objects.select_related(
             "actividad", "actividad__proyecto", "usuario"
         )
-        .filter(revisiones__isnull=True)
-        .exclude(actividad__estado=Actividades.EstadoActividad.APROBADA)
+        .filter(
+            revisiones__isnull=True,
+            # Solo lo entregado: una actividad Pendiente o en Requiere ajustes
+            # tiene un borrador abierto, que no es asunto del revisor.
+            actividad__estado=Actividades.EstadoActividad.EN_REVISION,
+        )
+        # Y solo la versión vigente. El flujo anterior dejó actividades con
+        # varias entregas sin revisar a la vez; las que no son la última están
+        # reemplazadas y `puede_revisar` ya las rechaza, así que listarlas sería
+        # ofrecer un trabajo que al pulsarlo da 403.
+        .annotate(
+            _ultima_version=Subquery(
+                ActividadEntrega.objects.filter(actividad=OuterRef("actividad"))
+                .order_by("-numero_version")
+                .values("numero_version")[:1]
+            )
+        )
+        .filter(numero_version=F("_ultima_version"))
     )
     if user.is_superuser:
         return qs.distinct()

@@ -94,7 +94,8 @@ Modelos (en `contenido/models.py`, **no modificar**):
 | `forms.py` | `LoginForm` y `CambiarPasswordForm` (cambio de contraseña) estilizados. |
 | `views.py` | `AppLoginView`, `AppLogoutView`, `PerfilView`, `CambiarPasswordView` (basada en `PasswordChangeView`; mantiene la sesión y redirige a Mi perfil con mensaje de éxito). |
 | `urls.py` | `cuentas:login`, `cuentas:logout`, `cuentas:perfil`, `cuentas:cambiar_password` (`perfil/contrasena/`). |
-| `validadores.py` | Lista blanca de extensiones, tope de tamaño (1 GB, el del bucket) y `nombre_seguro()`, que translitera el nombre del archivo (tildes y eñes fuera) antes de que llegue al bucket. `ArchivoValidadoMixin` lo aplica en los formularios con `FileField`. |
+| `models.py` · `admin.py` | `ExtensionArchivo`: las extensiones admitidas al subir archivos, **administrables desde el panel** en vez de escritas en el código. Se siembran en una migración de datos con las 12 de siempre; si la tabla queda vacía, el validador cae a un conjunto de respaldo para no dejar la plataforma sin subidas. |
+| `validadores.py` | Lee de ahí las extensiones activas (con caché de proceso), tope de tamaño (1 GB, el del bucket) y `nombre_seguro()`, que translitera el nombre del archivo (tildes y eñes fuera) antes de que llegue al bucket. `ArchivoValidadoMixin` lo aplica en los formularios con `FileField`. |
 | `subidas.py` | **Transporte de archivos compartido por los dos dominios**: firma la URL de subida (`firmar_subida`), arma la clave del objeto (`clave_de_objeto`), verifica con `head_object` lo que el navegador dice haber subido (`confirmar_subida`) y firma las descargas con nombre legible (`url_de_descarga`). |
 | `apps.py` | Invalida por `m2m_changed` la caché de grupos de `roles_de`, para que cambiar los roles de un usuario no deje permisos obsoletos. |
 
@@ -131,6 +132,7 @@ Modelos (en `contenido/models.py`, **no modificar**):
 | `/actividades/<pk>/subactividades/nueva/` | `subactividad_nueva` | `SubactividadCreateView` | Coordinador |
 | `/actividades/<pk>/entregas/nueva/` | `entrega_nueva` | `EntregaCreateView` | Ejecutor asignado (formulador o coordinador) |
 | `/entregas/<pk>/` | `entrega_detalle` | `EntregaDetailView` | scoping |
+| `/entregas/<pk>/realizar/` | `entrega_realizar` | `EntregaRealizarView` (cierra la entrega y la manda a revisión) | Ejecutor dueño, con la entrega en borrador |
 | `/entregas/<pk>/documentos/nuevo/` | `documento_nuevo` | `DocumentoCreateView` (POST clásico, hoy de respaldo) | Ejecutor dueño de la entrega |
 | `/entregas/<pk>/subir/firmar/` | `subida_firmar` | `SubidaFirmarView` | Ejecutor dueño de la entrega |
 | `/entregas/<pk>/subir/confirmar/` | `subida_confirmar` | `SubidaConfirmarView` | Ejecutor dueño de la entrega |
@@ -147,12 +149,12 @@ Modelos (en `contenido/models.py`, **no modificar**):
 
 1. **Director** crea proyecto y lo asigna a un **Coordinador**.
 2. Se crean actividades (y subactividades) y se asignan a quien las ejecuta: el **Coordinador** las asigna a **Formuladores**; el **Director** puede asignarlas a un **Coordinador** o a un **Formulador** (estado inicial: Pendiente).
-3. El **ejecutor** (formulador o coordinador) registra una **entrega** (versión) → la actividad pasa a **En revisión**; adjunta documentos.
+3. El **ejecutor** (formulador o coordinador) abre una **entrega** (versión) y adjunta documentos: es un **borrador** y la actividad sigue Pendiente. Al pulsar **"Realizar entrega"** (exige al menos un documento) la actividad pasa a **En revisión** y el paquete queda congelado. Solo hay una entrega abierta a la vez.
 4. **Revisa quien corresponde** (`responsable_revision`): el **Coordinador** del proyecto si la ejecutó un formulador; el **Director** si la ejecutó un coordinador.
    - **Aprobada** → actividad **Aprobada** (finalizada).
-   - **Requiere ajustes / Rechazada** → actividad **Requiere ajustes**; el ejecutor crea una nueva entrega.
+   - **Requiere ajustes** → actividad **Requiere ajustes**; el ejecutor abre una versión nueva. Son las **dos únicas salidas**: "Rechazada" sigue en el modelo (definitivo) pero ni se ofrece ni se acepta, porque hacía lo mismo que "Requiere ajustes".
 
-Colores de estado: Pendiente (gris), En revisión (azul), Requiere ajustes (ámbar), Aprobada (verde), Vencida/Rechazada (rojo).
+Colores de estado: Pendiente (gris), En revisión (azul), Requiere ajustes (ámbar), Aprobada (verde), Vencida (rojo). **Entregar detiene el reloj**: una actividad En revisión o Aprobada no se marca vencida aunque su fecha haya pasado (filtro `vencida` en `web_extras` y `metrics.ESTADOS_SIN_PLAZO`, que tienen que ir a la par).
 
 ---
 

@@ -12,11 +12,49 @@ from pathlib import Path
 from django.core.exceptions import ValidationError
 from django.utils.text import get_valid_filename
 
-# Extensiones admitidas: documentos y pruebas de pantalla. En minúsculas.
-EXTENSIONES_PERMITIDAS = frozenset({
+# Respaldo del conjunto admitido, en minúsculas y con punto. La lista que manda
+# vive en la base (`cuentas.models.ExtensionArchivo`), administrable desde el
+# panel; esto es lo que se usa si esa tabla está vacía, para que un borrado
+# accidental no deje la plataforma sin poder subir ningún archivo.
+EXTENSIONES_POR_OMISION = frozenset({
     ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".odt", ".ods",
     ".jpg", ".jpeg", ".png", ".webp", ".zip",
 })
+
+# Caché de proceso: `validar_extension` se llama en cada firma de subida y en
+# cada formulario con archivo, y la lista cambia muy de vez en cuando. La
+# invalidan las señales de `cuentas/apps.py` al guardar o borrar una extensión.
+_cache_extensiones = None
+
+
+def limpiar_cache_de_extensiones():
+    """Olvida la lista cacheada. La llaman las señales de `apps.py`."""
+    global _cache_extensiones
+    _cache_extensiones = None
+
+
+def extensiones_permitidas():
+    """Extensiones activas, de la base; el conjunto del código si no hay ninguna.
+
+    Durante las migraciones iniciales la tabla puede no existir todavía, y en ese
+    caso tampoco hay nada que validar: se responde con el respaldo en vez de
+    reventar.
+    """
+    global _cache_extensiones
+    if _cache_extensiones is not None:
+        return _cache_extensiones
+    try:
+        from .models import ExtensionArchivo
+
+        activas = frozenset(
+            ExtensionArchivo.objects.filter(activa=True).values_list(
+                "extension", flat=True
+            )
+        )
+    except Exception:
+        return EXTENSIONES_POR_OMISION
+    _cache_extensiones = activas or EXTENSIONES_POR_OMISION
+    return _cache_extensiones
 
 # Tamaño máximo por archivo. Suficiente para un PDF escaneado y lejos de lo que
 # tarda en subirse por una conexión mala.
@@ -73,9 +111,10 @@ def validar_extension(nombre):
     La subida directa al bucket tiene que decidir antes de firmar el permiso,
     cuando todavía no hay ningún archivo en el servidor.
     """
+    permitidas = extensiones_permitidas()
     extension = Path(nombre or "").suffix.lower()
-    if extension not in EXTENSIONES_PERMITIDAS:
-        admitidas = ", ".join(sorted(e.lstrip(".") for e in EXTENSIONES_PERMITIDAS))
+    if extension not in permitidas:
+        admitidas = ", ".join(sorted(e.lstrip(".") for e in permitidas))
         raise ValidationError(
             f"«{extension or nombre}» no es un tipo de archivo admitido. "
             f"Usa uno de estos: {admitidas}."
@@ -133,3 +172,33 @@ class ArchivoValidadoMixin:
             # archivo quedan cubiertos en un solo sitio.
             archivo.name = nombre_seguro(archivo.name)
         return cleaned
+
+
+class ArchivoValidadoAdminMixin:
+    """Lleva ``ArchivoValidadoMixin`` a los formularios del Django Admin.
+
+    El admin genera sus formularios solos, así que no heredaban la validación:
+    quien tuviera acceso podía subir un ejecutable o un archivo enorme por ahí,
+    justo lo que los cuatro formularios de la aplicación sí impiden. El admin es
+    una herramienta de soporte, no una puerta trasera.
+
+    Se mezcla sobre la clase que construye el admin en vez de declarar un
+    ``form`` por modelo: así vale igual para los cuatro y no hay que recordar
+    añadirlo al siguiente.
+    """
+
+    @staticmethod
+    def _con_validacion(base):
+        return type(base.__name__, (ArchivoValidadoMixin, base), {})
+
+    def get_form(self, request, obj=None, **kwargs):
+        return self._con_validacion(super().get_form(request, obj, **kwargs))
+
+
+class ArchivoValidadoInlineMixin(ArchivoValidadoAdminMixin):
+    """Lo mismo para los inlines (los documentos cuelgan de una entrega)."""
+
+    def get_formset(self, request, obj=None, **kwargs):
+        formset = super().get_formset(request, obj, **kwargs)
+        formset.form = self._con_validacion(formset.form)
+        return formset

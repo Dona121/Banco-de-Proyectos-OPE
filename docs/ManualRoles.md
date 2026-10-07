@@ -68,7 +68,7 @@ subactividad → entrega → revisión.
    les pone fecha de entrega y se las asigna a un coordinador o a un formulador.
 4. **Revisar.** Cuando un **coordinador** entrega una actividad que el director le
    asignó, el director la revisa y decide: **Aprobada** (queda terminada) o
-   **Requiere ajustes / Rechazada** (vuelve al coordinador para corregir).
+   **Requiere ajustes** (vuelve al coordinador para corregir).
 
 **Qué se activa cuando actúa:**
 - Al **asignar el proyecto a un coordinador**, a ese coordinador le aparece un
@@ -100,7 +100,11 @@ actividad para **ejecutarla** él mismo.
 2. **Revisar la entrega.** Cuando un formulador entrega, el coordinador revisa y
    decide:
    - **Aprobada** → la actividad queda terminada.
-   - **Requiere ajustes** o **Rechazada** → vuelve al formulador para que corrija.
+   - **Requiere ajustes** → vuelve al formulador, que abre una versión nueva.
+
+   > Antes había una tercera opción, **Rechazada**, que hacía exactamente lo mismo
+   > que «Requiere ajustes». Se retiró: dos nombres para una sola cosa solo
+   > confundían. Las revisiones antiguas que la tengan se siguen viendo.
 3. **Ejecutar (cuando el director le asigna una actividad).** La realiza y la
    entrega, igual que un formulador; su revisión la hace el **director**.
 
@@ -126,12 +130,17 @@ actividad para **ejecutarla** él mismo.
 **En qué procesos participa y qué hace:**
 1. **Realizar la actividad.** Hace el trabajo de la actividad (y de sus
    subactividades, si las tiene).
-2. **Entregar.** Sube la entrega con los documentos de soporte. Mientras el archivo
-   sube se ve el porcentaje y puede **cancelar**; si se equivocó de archivo, puede
-   **quitarlo** y volver a subirlo mientras **la actividad no esté aprobada** (una
-   actividad aprobada cierra el expediente y sus soportes ya no se tocan). Cada
-   documento se puede **abrir o descargar**.
-3. **Corregir.** Si le piden ajustes, corrige y vuelve a entregar.
+2. **Preparar la entrega.** Abre una entrega y sube sus documentos de soporte.
+   Mientras tanto es un **borrador que solo ve él**: la actividad sigue Pendiente
+   y nadie la está esperando para revisar. Puede subir, **quitar** y volver a
+   subir las veces que haga falta; al subir se ve el porcentaje y hay botón de
+   **cancelar**. Cada documento se puede **abrir o descargar**.
+3. **Realizar la entrega.** Cuando está lista, pulsa **«Realizar entrega»**. Hace
+   falta **al menos un documento adjunto**. A partir de ahí la actividad pasa a
+   **En revisión** y la entrega **queda en firme**: no se le pueden añadir ni
+   quitar documentos, y tampoco se puede abrir otra entrega.
+4. **Corregir.** Si le piden ajustes, abre una **versión nueva**, la prepara y la
+   realiza igual que la anterior.
 
 **Qué se activa cuando actúa:**
 - Al **entregar**, la actividad pasa a **“En revisión”** y al coordinador le
@@ -144,6 +153,11 @@ actividad para **ejecutarla** él mismo.
 Además de lo anterior, el sistema avisa de los **plazos**: cuando la fecha de
 entrega de una actividad está por cumplirse (o ya se venció), al responsable de
 esa actividad le aparece un aviso de plazo.
+
+**Entregar detiene el reloj.** Una vez realizada la entrega, la actividad deja de
+aparecer como vencida y su fecha deja de verse en rojo, se haya entregado a
+tiempo o tarde: ya no hay nada que reclamar. Si se la devuelven con «Requiere
+ajustes», el plazo vuelve a contar, porque vuelve a estar pendiente.
 
 ---
 

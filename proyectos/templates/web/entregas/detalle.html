@@ -16,10 +16,38 @@
         Por {{ entrega.usuario.get_full_name|default:entrega.usuario.username }} · {{ entrega.fecha_creacion|naturaltime }}
       </p>
     </div>
-    <a href="{% url 'web:actividad_detalle' entrega.actividad_id %}" class="btn btn-outline">Volver a la actividad</a>
+    <div class="flex items-center gap-2">
+      <a href="{% url 'web:actividad_detalle' entrega.actividad_id %}" class="btn btn-outline">Volver a la actividad</a>
+      {% if puede_realizar %}
+      <form method="post" action="{% url 'web:entrega_realizar' entrega.pk %}">
+        {% csrf_token %}
+        <button class="btn btn-primary">Realizar entrega</button>
+      </form>
+      {% elif es_borrador and puede_documentar %}
+      {% comment %}Visible y deshabilitado, con el motivo al lado: esconderlo dejaría al usuario sin saber qué le falta.{% endcomment %}
+      <button class="btn btn-primary" disabled>Realizar entrega</button>
+      {% endif %}
+    </div>
   </div>
   {% if entrega.comentario %}
   <div class="mt-4 rounded-lg bg-slate-50 border border-slate-100 p-4 text-sm text-slate-600">{{ entrega.comentario }}</div>
+  {% endif %}
+
+  {% if es_borrador and puede_documentar %}
+  <div class="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 leading-snug">
+    {% if puede_realizar %}
+    Esta entrega todavía <strong>no se ha realizado</strong>: solo la ves tú. Cuando
+    pulses «Realizar entrega» pasará a revisión y ya no podrás cambiar sus documentos.
+    {% else %}
+    Esta entrega todavía <strong>no se ha realizado</strong>: solo la ves tú.
+    <strong>Adjunta al menos un documento</strong> para poder realizarla.
+    {% endif %}
+  </div>
+  {% elif not es_borrador and entrega.usuario_id == request.user.id %}
+  <div class="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 leading-snug">
+    Entrega realizada: está en manos del revisor y sus documentos ya no se pueden
+    cambiar. Si te piden ajustes podrás abrir una versión nueva.
+  </div>
   {% endif %}
 </div>
 

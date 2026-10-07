@@ -3,9 +3,14 @@
 Herramienta técnica de parametrización/soporte. La interfaz de negocio es la
 app web del módulo; aquí los superusuarios parametrizan y auditan.
 """
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.shortcuts import render
 from django.utils.translation import gettext_lazy as _
 
+from cuentas.validadores import (
+    ArchivoValidadoAdminMixin,
+    ArchivoValidadoInlineMixin,
+)
 from unfold.admin import ModelAdmin, TabularInline
 from unfold.contrib.filters.admin import ChoicesDropdownFilter, RelatedDropdownFilter
 from unfold.decorators import display
@@ -57,7 +62,7 @@ class DocumentoEntregaInline(TabularInline):
     show_change_link = True
 
 
-class DocumentosCuentaCobroInline(TabularInline):
+class DocumentosCuentaCobroInline(ArchivoValidadoInlineMixin, TabularInline):
     model = DocumentosCuentaCobro
     extra = 0
     fields = ("tipo_documento", "documento", "estado", "comentario")
@@ -87,14 +92,14 @@ class RevisionParaRadicacionInline(TabularInline):
     autocomplete_fields = ("supervisor",)
 
 
-class DocumentoCierreInline(TabularInline):
+class DocumentoCierreInline(ArchivoValidadoInlineMixin, TabularInline):
     model = DocumentoCierre
     extra = 0
     fields = ("tipo_documento", "documento", "usuario")
     autocomplete_fields = ("tipo_documento", "usuario")
 
 
-class TramiteFinalInline(TabularInline):
+class TramiteFinalInline(ArchivoValidadoInlineMixin, TabularInline):
     model = TramiteFinal
     extra = 0
     fields = ("tipo", "realizado", "evidencia", "usuario", "comentario")
@@ -141,6 +146,50 @@ class RequisitoDocumentalAdmin(ModelAdmin):
 # --------------------------------------------------------------------------- #
 # Cuentas de cobro
 # --------------------------------------------------------------------------- #
+@admin.action(
+    description="ELIMINAR la cuenta con todo su rastro (datos de prueba)",
+    permissions=["borrado_total"],
+)
+def eliminar_cuentas_con_rastro(modeladmin, request, queryset):
+    """Retira una cuenta de cobro completa: documentos, revisiones, asignaciones,
+    cierre, trámites, bitácora y los archivos del bucket.
+
+    El borrado normal falla porque `RevisionCuentaCobro.asignacion` es
+    `PROTECT`. Existe para limpiar las pruebas que se hacen en producción; no es
+    una papelera de uso corriente, y por eso la reserva el superusuario y pide
+    confirmación enseñando lo que se lleva.
+    """
+    from cuentas.borrado import eliminar_cuenta_con_rastro
+    from . import services
+
+    if request.POST.get("confirmado"):
+        for cuenta in list(queryset):
+            eliminar_cuenta_con_rastro(cuenta)
+        messages.success(request, "Cuenta(s) eliminada(s) con todo su rastro.")
+        return None
+
+    detalle = []
+    for c in queryset:
+        detalle.append(
+            f"{services.nombre_de_cuenta(c)} ({c.usuario.username}): "
+            f"{c.documentoentrega_set.count()} versión(es), "
+            f"{c.documentocierre_set.count()} documento(s) de cierre, "
+            f"{c.tramites_finales.count()} trámite(s) y "
+            f"{c.eventos.count()} evento(s) de trazabilidad."
+        )
+    return render(request, "admin/confirmar_borrado.html", {
+        "titulo": "Eliminar cuentas de cobro definitivamente",
+        "advertencia": (
+            "Se eliminará cada cuenta con toda su trazabilidad. La bitácora es "
+            "el registro de quién hizo qué sobre un trámite de pago: una vez "
+            "borrada no se reconstruye."
+        ),
+        "detalle": detalle,
+        "objetos": queryset,
+        "accion": "eliminar_cuentas_con_rastro",
+    })
+
+
 @admin.register(CuentaEntrega)
 class CuentaEntregaAdmin(ModelAdmin):
     list_display = (
@@ -154,6 +203,11 @@ class CuentaEntregaAdmin(ModelAdmin):
     )
     search_fields = ("usuario__username", "usuario__first_name", "vigencia__vigencia")
     ordering = ("-fecha_creacion",)
+    actions = (eliminar_cuentas_con_rastro,)
+
+    def has_borrado_total_permission(self, request):
+        """Solo superusuario: se lleva la trazabilidad de un trámite de pago."""
+        return request.user.is_superuser
     autocomplete_fields = ("usuario", "vigencia")
     readonly_fields = (
         "fecha_radicacion", "fecha_aprobacion_revisores",
@@ -213,7 +267,7 @@ class RevisionCuentaCobroAdmin(ModelAdmin):
 
 
 @admin.register(TramiteFinal)
-class TramiteFinalAdmin(ModelAdmin):
+class TramiteFinalAdmin(ArchivoValidadoAdminMixin, ModelAdmin):
     list_display = ("cuenta_entrega", "tipo", "realizado", "usuario", "fecha_creacion")
     list_filter = (("tipo", ChoicesDropdownFilter), "realizado")
     search_fields = ("cuenta_entrega__usuario__username",)

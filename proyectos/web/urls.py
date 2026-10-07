@@ -26,6 +26,9 @@ urlpatterns = [
 
     # Entregas
     path("entregas/<int:pk>/", views.EntregaDetailView.as_view(), name="entrega_detalle"),
+    # Cierre de la entrega: la congela y la manda a revisión.
+    path("entregas/<int:pk>/realizar/",
+         views.EntregaRealizarView.as_view(), name="entrega_realizar"),
     path("entregas/<int:entrega_pk>/documentos/nuevo/",
          views.DocumentoCreateView.as_view(), name="documento_nuevo"),
     # Subida directa al bucket: el archivo no pasa por el servidor.

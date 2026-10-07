@@ -5,12 +5,15 @@ personal de soporte parametrizan, auditan y corrigen datos sobre TODOS los
 modelos, con el control de permisos estándar de Django (no por rol de negocio).
 """
 from django.contrib import admin, messages
+from django.shortcuts import render
 from django.contrib.auth.admin import GroupAdmin as DjangoGroupAdmin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.contrib.auth.models import Group, User
 from django.utils.translation import gettext_lazy as _
 
 from unfold.admin import ModelAdmin, StackedInline, TabularInline
+
+from cuentas.validadores import ArchivoValidadoAdminMixin, ArchivoValidadoInlineMixin
 from unfold.contrib.filters.admin import ChoicesDropdownFilter, RelatedDropdownFilter
 from unfold.decorators import action, display
 from unfold.forms import AdminPasswordChangeForm, UserChangeForm, UserCreationForm
@@ -63,7 +66,7 @@ class ActividadEntregaInline(TabularInline):
     show_change_link = True
 
 
-class DocumentosInline(TabularInline):
+class DocumentosInline(ArchivoValidadoInlineMixin, TabularInline):
     model = Documentos
     extra = 0
     fields = ("nombre", "archivo")
@@ -179,7 +182,7 @@ class ActividadEntregaAdmin(ModelAdmin):
 # Documentos
 # --------------------------------------------------------------------------- #
 @admin.register(Documentos)
-class DocumentosAdmin(ModelAdmin):
+class DocumentosAdmin(ArchivoValidadoAdminMixin, ModelAdmin):
     list_display = ("nombre", "actividad_entrega", "fecha_creacion")
     search_fields = ("nombre", "actividad_entrega__actividad__nombre")
     ordering = ("-fecha_creacion",)
@@ -203,12 +206,86 @@ class RevisionesAdmin(ModelAdmin):
     def resultado_badge(self, obj):
         return obj.get_resultado_display()
 
+    def formfield_for_choice_field(self, db_field, request, **kwargs):
+        """"Rechazada" tampoco se ofrece aquí.
+
+        Dejó de usarse en la app (hacía lo mismo que "Requiere ajustes"); si
+        siguiera disponible en el admin volvería a aparecer en los datos. Las
+        revisiones históricas que ya la tengan se siguen viendo: solo se quita
+        de las opciones al editar.
+        """
+        if db_field.name == "resultado":
+            kwargs["choices"] = [
+                (c.value, c.label)
+                for c in Revisiones.ResultadoRevision
+                if c != Revisiones.ResultadoRevision.RECHAZADA
+            ]
+        return super().formfield_for_choice_field(db_field, request, **kwargs)
+
 
 # --------------------------------------------------------------------------- #
 # Usuarios y Roles (Grupos) con estilos de Unfold
 # --------------------------------------------------------------------------- #
 admin.site.unregister(User)
 admin.site.unregister(Group)
+
+
+# --------------------------------------------------------------------------- #
+# Acciones sobre usuarios: desactivar es lo normal; borrar es la excepción
+# --------------------------------------------------------------------------- #
+@admin.action(description="Desactivar (no podrán entrar, su rastro se conserva)")
+def desactivar_usuarios(modeladmin, request, queryset):
+    n = queryset.update(is_active=False)
+    messages.success(request, f"{n} usuario(s) desactivado(s).")
+
+
+@admin.action(description="Reactivar")
+def activar_usuarios(modeladmin, request, queryset):
+    n = queryset.update(is_active=True)
+    messages.success(request, f"{n} usuario(s) reactivado(s).")
+
+
+@admin.action(
+    description="ELIMINAR definitivamente, con todo lo que tocaron",
+    permissions=["borrado_total"],
+)
+def eliminar_usuarios_con_rastro(modeladmin, request, queryset):
+    """Borrado real de un usuario y de todo lo que lo referencia.
+
+    Nueve claves ``PROTECT`` apuntan a ``User``, así que el borrado normal
+    falla: no es un descuido, es que una cuenta de cobro dice quién la presentó
+    y quién la aprobó. Esta acción retira primero esas cuentas **enteras**, y
+    por eso enseña antes qué se va a llevar por delante.
+
+    Para un usuario que ya trabajó, lo sano es **desactivarlo**.
+    """
+    from cuentas.borrado import eliminar_usuario_con_rastro, resumen_de_borrado
+
+    if request.POST.get("confirmado"):
+        for usuario in list(queryset):
+            eliminar_usuario_con_rastro(usuario)
+        messages.success(request, "Usuario(s) eliminado(s) con todo su rastro.")
+        return None
+
+    detalle = []
+    for usuario in queryset:
+        r = resumen_de_borrado(usuario)
+        detalle.append(
+            f"{usuario.username}: {len(r['cuentas'])} cuenta(s) de cobro, "
+            f"{len(r['proyectos'])} proyecto(s) y {r['n_actividades']} actividad(es)."
+        )
+    return render(request, "admin/confirmar_borrado.html", {
+        "titulo": "Eliminar usuarios definitivamente",
+        "advertencia": (
+            "Se eliminarán los usuarios y TODO lo que los referencia. No se "
+            "borra solo su parte: una cuenta de cobro en la que intervinieron "
+            "desaparece completa, con su trazabilidad. Si lo que quieres es que "
+            "dejen de entrar, usa «Desactivar»."
+        ),
+        "detalle": detalle,
+        "objetos": queryset,
+        "accion": "eliminar_usuarios_con_rastro",
+    })
 
 
 @admin.register(User)
@@ -218,10 +295,19 @@ class UserAdmin(DjangoUserAdmin, ModelAdmin):
     change_password_form = AdminPasswordChangeForm
     list_display = ("username", "get_full_name", "email", "mostrar_roles", "is_staff", "is_active")
     list_filter = ("is_staff", "is_superuser", "is_active", "groups")
+    actions = (desactivar_usuarios, activar_usuarios, eliminar_usuarios_con_rastro)
 
     @display(description=_("Roles"))
     def mostrar_roles(self, obj):
         return ", ".join(obj.groups.values_list("name", flat=True)) or "-"
+
+    def has_borrado_total_permission(self, request):
+        """Permiso de la acción destructiva: solo superusuario.
+
+        Un `staff` con permiso de cambio sobre usuarios podría desactivarlos,
+        que es reversible; llevarse por delante cuentas de cobro enteras no.
+        """
+        return request.user.is_superuser
 
 
 @admin.register(Group)

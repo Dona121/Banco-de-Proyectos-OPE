@@ -495,10 +495,9 @@ class EntregaDetailView(ModuloProyectosRequeridoMixin, DetailView):
         ) else None
         # Documenta el ejecutor (quien hizo la entrega), sea formulador o
         # coordinador; nunca el revisor.
-        ctx["puede_documentar"] = (
-            entrega.usuario_id == user.id
-            and entrega.actividad.estado != Estado.APROBADA
-        ) or user.is_superuser
+        ctx["es_borrador"] = not selectors.entrega_enviada(entrega)
+        ctx["puede_documentar"] = selectors.puede_documentar(user, entrega)
+        ctx["puede_realizar"] = selectors.puede_realizar_entrega(user, entrega)
         ctx["puede_revisar"] = selectors.puede_revisar(user, entrega)
         ctx["documento_form"] = DocumentoForm()
         ctx["revision_form"] = RevisionForm()
@@ -511,6 +510,30 @@ class EntregaDetailView(ModuloProyectosRequeridoMixin, DetailView):
         return ctx
 
 
+class EntregaRealizarView(ModuloProyectosRequeridoMixin, View):
+    """Envía la entrega a revisión: el momento de cierre que faltaba.
+
+    Hasta aquí la versión es un borrador que solo ve su autor; a partir de aquí
+    el paquete queda congelado y la actividad pasa a En revisión.
+    """
+
+    def post(self, request, pk):
+        entrega = get_object_or_404(
+            selectors.entregas_visibles(request.user), pk=pk
+        )
+        try:
+            services.realizar_entrega(entrega, request.user)
+        except ValidationError as exc:
+            messages.error(request, "; ".join(exc.messages))
+        else:
+            messages.success(
+                request,
+                f"Entrega v{entrega.numero_version} realizada. "
+                "Queda en revisión y ya no admite cambios.",
+            )
+        return redirect("web:entrega_detalle", pk=entrega.pk)
+
+
 class DocumentoCreateView(ModuloProyectosRequeridoMixin, View):
     """Adjunta un documento a una entrega (formulador dueño de la entrega)."""
 
@@ -518,11 +541,7 @@ class DocumentoCreateView(ModuloProyectosRequeridoMixin, View):
         entrega = get_object_or_404(
             selectors.entregas_visibles(request.user), pk=entrega_pk
         )
-        permitido = (
-            request.user.is_superuser
-            or entrega.usuario_id == request.user.id  # el ejecutor de la entrega
-        )
-        if not permitido or entrega.actividad.estado == Estado.APROBADA:
+        if not selectors.puede_documentar(request.user, entrega):
             raise PermissionDenied()
         form = DocumentoForm(request.POST, request.FILES)
         if form.is_valid():
@@ -553,12 +572,14 @@ class _SubidaEntregaMixin(ModuloProyectosRequeridoMixin, View):
         entrega = get_object_or_404(
             selectors.entregas_visibles(request.user), pk=entrega_pk
         )
-        # El mismo criterio que `DocumentoCreateView`: documenta el ejecutor de la
-        # entrega, y no una vez aprobada la actividad.
-        if not (request.user.is_superuser or entrega.usuario_id == request.user.id):
-            raise PermissionDenied()
-        if entrega.actividad.estado == Estado.APROBADA:
-            raise PermissionDenied("La actividad ya está aprobada.")
+        # El mismo criterio que `DocumentoCreateView`: documenta el ejecutor de
+        # la entrega, y solo mientras siga siendo un borrador. Comprobarlo aquí
+        # es lo que de verdad cierra la subida: esconder el botón en la
+        # plantilla no impide un POST directo a estos dos endpoints.
+        if not selectors.puede_documentar(request.user, entrega):
+            raise PermissionDenied(
+                "Esta entrega ya se realizó y no admite más documentos."
+            )
         return entrega
 
 
@@ -619,8 +640,7 @@ class DocumentoEliminarView(ModuloProyectosRequeridoMixin, View):
             selectors.entregas_visibles(request.user),
             pk=documento.actividad_entrega_id,
         )
-        permitido = request.user.is_superuser or entrega.usuario_id == request.user.id
-        if not permitido or entrega.actividad.estado == Estado.APROBADA:
+        if not selectors.puede_documentar(request.user, entrega):
             raise PermissionDenied()
         nombre, archivo = documento.nombre, documento.archivo
         documento.delete()

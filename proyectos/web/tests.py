@@ -8,9 +8,20 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from contenido.models import Actividades, Documentos, Proyectos, Revisiones
-from web import selectors, services
-from web.forms import ActividadForm
+from django.core.exceptions import ValidationError
+
+from contenido.models import (
+    Actividades,
+    ActividadEntrega,
+    Documentos,
+    Proyectos,
+    Revisiones,
+)
+from cuentas import validadores
+from cuentas.models import ExtensionArchivo
+from web import metrics, selectors, services
+from web.forms import ActividadForm, RevisionForm
+from web.templatetags.web_extras import vencida
 
 Estado = Actividades.EstadoActividad
 
@@ -41,10 +52,31 @@ class ReglaBBaseTest(TestCase):
             estado=estado, asignado_por=self.director, asignado_a=asignado_a,
         )
 
-    def _entrega(self, asignado_a):
-        """Actividad asignada a `asignado_a` con una entrega suya (queda EN_REVISION)."""
+    def _documento(self, entrega, nombre="Soporte"):
+        """Adjunta un documento a la entrega (hace falta para poder realizarla)."""
+        return Documentos.objects.create(
+            actividad_entrega=entrega, nombre=nombre,
+            archivo=SimpleUploadedFile(f"{nombre}.pdf", b"x",
+                                       content_type="application/pdf"),
+        )
+
+    def _borrador(self, asignado_a):
+        """Actividad con una entrega ABIERTA: creada y sin realizar todavía."""
         act = self._actividad(asignado_a)
-        entrega = services.crear_entrega(act, asignado_a, "v1")
+        return act, services.crear_entrega(act, asignado_a, "v1")
+
+    def _entrega(self, asignado_a):
+        """Actividad con una entrega ya REALIZADA (queda EN_REVISION).
+
+        Crear la versión y entregarla son dos actos distintos desde que existe
+        el botón "Realizar entrega": el andamiaje hace los dos para que las
+        pruebas que necesitan algo "ya entregado" sigan leyéndose igual.
+        """
+        act, entrega = self._borrador(asignado_a)
+        self._documento(entrega)
+        services.realizar_entrega(entrega, asignado_a)
+        act.refresh_from_db()
+        entrega.refresh_from_db()
         return act, entrega
 
 
@@ -752,14 +784,14 @@ class FlujoProyectosVistasTest(ReglaBBaseTest):
         self.assertEqual(act.asignado_por, self.director)
         self.assertEqual(act.estado, Estado.PENDIENTE)
 
-        # 2. El formulador entrega → la actividad queda En revisión.
+        # 2. El formulador abre una entrega: sigue PENDIENTE, aún no entregó.
         self.client.force_login(self.form)
         resp = self.client.post(
             f"/actividades/{act.pk}/entregas/nueva/", {"comentario": "v1"}
         )
         self.assertEqual(resp.status_code, 302)
         act.refresh_from_db()
-        self.assertEqual(act.estado, Estado.EN_REVISION)
+        self.assertEqual(act.estado, Estado.PENDIENTE)
         entrega = act.actividadentrega_set.get()
 
         # 3. El formulador adjunta un documento (usa InMemoryStorage).
@@ -773,7 +805,13 @@ class FlujoProyectosVistasTest(ReglaBBaseTest):
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(entrega.documentos_set.count(), 1)
 
-        # 4. El coordinador del proyecto revisa y aprueba → actividad Aprobada.
+        # 4. Pulsa "Realizar entrega": ahora sí pasa a En revisión.
+        resp = self.client.post(f"/entregas/{entrega.pk}/realizar/")
+        self.assertEqual(resp.status_code, 302)
+        act.refresh_from_db()
+        self.assertEqual(act.estado, Estado.EN_REVISION)
+
+        # 5. El coordinador del proyecto revisa y aprueba → actividad Aprobada.
         self.client.force_login(self.coord)
         resp = self.client.post(
             f"/entregas/{entrega.pk}/revisar/",
@@ -791,6 +829,222 @@ class FlujoProyectosVistasTest(ReglaBBaseTest):
             {"resultado": Revisiones.ResultadoRevision.APROBADA, "comentario": "x"},
         )
         self.assertEqual(resp.status_code, 403)
+
+
+class RealizarEntregaTest(ReglaBBaseTest):
+    """La entrega tiene ahora un momento de cierre.
+
+    Antes, crear la versión mandaba la actividad a revisión en el acto, así que
+    se podían abrir varias a la vez y seguir cambiando los documentos de una que
+    el revisor ya tenía delante.
+    """
+
+    def test_crear_una_entrega_no_la_manda_a_revision(self):
+        act, entrega = self._borrador(self.form)
+        act.refresh_from_db()
+        self.assertEqual(act.estado, Estado.PENDIENTE)
+        self.assertFalse(selectors.entrega_enviada(entrega))
+        self.assertEqual(selectors.borrador_de(act), entrega)
+
+    def test_no_se_abre_una_segunda_entrega_con_un_borrador_abierto(self):
+        act, _ = self._borrador(self.form)
+        self.assertFalse(selectors.puede_crear_entrega(self.form, act))
+        with self.assertRaises(ValidationError):
+            services.crear_entrega(act, self.form, "v2")
+
+    def test_una_entrega_vacia_no_se_puede_realizar(self):
+        _, entrega = self._borrador(self.form)
+        self.assertFalse(selectors.puede_realizar_entrega(self.form, entrega))
+        with self.assertRaises(ValidationError):
+            services.realizar_entrega(entrega, self.form)
+
+    def test_con_un_documento_si_se_realiza(self):
+        act, entrega = self._borrador(self.form)
+        self._documento(entrega)
+        self.assertTrue(selectors.puede_realizar_entrega(self.form, entrega))
+        services.realizar_entrega(entrega, self.form)
+        act.refresh_from_db()
+        self.assertEqual(act.estado, Estado.EN_REVISION)
+        self.assertTrue(selectors.entrega_enviada(entrega))
+
+    def test_realizada_se_congela_el_paquete(self):
+        """Lo que motivó el cambio: cargar sobre una entrega ya en revisión."""
+        _, entrega = self._entrega(self.form)
+        self.assertFalse(selectors.puede_documentar(self.form, entrega))
+        self.client.force_login(self.form)
+        doc = entrega.documentos_set.first()
+        rutas = [
+            (f"/entregas/{entrega.pk}/documentos/nuevo/", {}),
+            (f"/entregas/{entrega.pk}/subir/firmar/",
+             {"nombre_documento": "X", "nombre": "a.pdf"}),
+            (f"/entregas/{entrega.pk}/subir/confirmar/", {"token": "x"}),
+            (f"/documentos/{doc.pk}/eliminar/", {}),
+        ]
+        for ruta, datos in rutas:
+            self.assertEqual(self.client.post(ruta, datos).status_code, 403, ruta)
+
+    def test_realizada_no_deja_abrir_otra_entrega(self):
+        act, _ = self._entrega(self.form)
+        self.assertFalse(selectors.puede_crear_entrega(self.form, act))
+        self.client.force_login(self.form)
+        resp = self.client.post(
+            f"/actividades/{act.pk}/entregas/nueva/", {"comentario": "v2"}
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_tras_pedir_ajustes_se_reabre(self):
+        act, entrega = self._entrega(self.form)
+        services.registrar_revision(
+            entrega, self.coord, Revisiones.ResultadoRevision.AJUSTES, "corrige"
+        )
+        act.refresh_from_db()
+        self.assertEqual(act.estado, Estado.AJUSTES)
+        self.assertTrue(selectors.puede_crear_entrega(self.form, act))
+        v2 = services.crear_entrega(act, self.form, "v2")
+        self.assertEqual(v2.numero_version, 2)
+        # La nueva admite documentos; la devuelta ya no.
+        self.assertTrue(selectors.puede_documentar(self.form, v2))
+        self.assertFalse(selectors.puede_documentar(self.form, entrega))
+
+    def test_una_version_reemplazada_no_es_editable_ni_revisable(self):
+        """Caso heredado: el flujo anterior dejó actividades con varias entregas
+        sin revisar a la vez. Solo cuenta la vigente."""
+        act, vieja = self._borrador(self.form)
+        self._documento(vieja)
+        # Se reproduce la anomalía tal como está en los datos: una segunda
+        # versión sin revisar sobre una actividad ya en revisión. El servicio
+        # hoy lo impide, así que se crea directamente.
+        nueva = ActividadEntrega(actividad=act, usuario=self.form, comentario="v2")
+        nueva.save()
+        act.estado = Estado.EN_REVISION
+        act.save(update_fields=["estado"])
+
+        self.assertTrue(selectors.entrega_enviada(nueva))      # la vigente
+        self.assertFalse(selectors.entrega_enviada(vieja))     # reemplazada
+        self.assertFalse(selectors.puede_documentar(self.form, vieja))
+        self.assertFalse(selectors.puede_revisar(self.coord, vieja))
+        self.assertNotIn(vieja, selectors.entregas_por_revisar(self.coord))
+        self.assertIn(nueva, selectors.entregas_por_revisar(self.coord))
+
+    def test_un_borrador_no_llega_a_la_bandeja_del_revisor(self):
+        _, entrega = self._borrador(self.form)
+        self.assertFalse(selectors.puede_revisar(self.coord, entrega))
+        self.assertNotIn(entrega, selectors.entregas_por_revisar(self.coord))
+
+    def test_el_detalle_ofrece_el_boton_solo_con_documentos(self):
+        _, entrega = self._borrador(self.form)
+        self.client.force_login(self.form)
+        url = f"/entregas/{entrega.pk}/"
+        cuerpo = self.client.get(url).content.decode()
+        self.assertIn("Adjunta al menos un documento", cuerpo)
+        self.assertNotIn(f"/entregas/{entrega.pk}/realizar/", cuerpo)
+
+        self._documento(entrega)
+        cuerpo = self.client.get(url).content.decode()
+        self.assertIn(f"/entregas/{entrega.pk}/realizar/", cuerpo)
+        self.assertIn("Realizar entrega", cuerpo)
+
+
+class RevisionSinRechazoTest(ReglaBBaseTest):
+    """Rechazada hacía lo mismo que Requiere ajustes, y solo confundía."""
+
+    def test_el_formulario_no_la_ofrece(self):
+        valores = [v for v, _ in RevisionForm().fields["resultado"].choices]
+        self.assertEqual(valores, ["AP", "AJ"])
+
+    def test_el_servicio_la_rechaza(self):
+        _, entrega = self._entrega(self.form)
+        with self.assertRaises(ValidationError):
+            services.registrar_revision(
+                entrega, self.coord, Revisiones.ResultadoRevision.RECHAZADA, "no"
+            )
+        self.assertFalse(Revisiones.objects.exists())
+
+    def test_la_vista_tampoco(self):
+        _, entrega = self._entrega(self.form)
+        self.client.force_login(self.coord)
+        self.client.post(
+            f"/entregas/{entrega.pk}/revisar/",
+            {"resultado": Revisiones.ResultadoRevision.RECHAZADA, "comentario": "no"},
+        )
+        self.assertFalse(Revisiones.objects.exists())
+
+
+class VencimientoTest(ReglaBBaseTest):
+    """Entregar detiene el reloj: no se reclama un trabajo ya entregado."""
+
+    def _actividad_vencida(self, estado):
+        """Una actividad cuyo plazo ya pasó, con fechas coherentes entre sí.
+
+        Mover solo el vencimiento al pasado dejaba la fecha programada por
+        delante, que es imposible; desde que esa regla se aplica de verdad
+        (señal `pre_save` y restricción en la base) hay que mover las dos.
+        """
+        act = self._actividad(self.form, estado=estado)
+        act.fecha_programada = timezone.now() - timedelta(days=10)
+        act.fecha_vencimiento = timezone.now() - timedelta(days=3)
+        act.save(update_fields=["fecha_programada", "fecha_vencimiento"])
+        return act
+
+    def test_pendiente_y_ajustes_siguen_vencidas(self):
+        for estado in (Estado.PENDIENTE, Estado.AJUSTES):
+            with self.subTest(estado=estado):
+                self.assertTrue(vencida(self._actividad_vencida(estado)))
+
+    def test_en_revision_y_aprobada_no(self):
+        for estado in (Estado.EN_REVISION, Estado.APROBADA):
+            with self.subTest(estado=estado):
+                self.assertFalse(vencida(self._actividad_vencida(estado)))
+
+    def test_los_contadores_del_panel_siguen_la_misma_regla(self):
+        self._actividad_vencida(Estado.PENDIENTE)
+        self._actividad_vencida(Estado.EN_REVISION)
+        datos = metrics.formulador(self.form)
+        self.assertEqual(datos["vencidas_count"], 1)
+
+    def test_la_campana_no_avisa_de_algo_ya_entregado(self):
+        self._actividad_vencida(Estado.EN_REVISION)
+        plazos = [
+            n for n in services.notificaciones_para(self.form)
+            if n["tipo"] == services.NOTIF_PLAZO
+        ]
+        self.assertEqual(plazos, [])
+
+
+class ExtensionesParametrizablesTest(TestCase):
+    """La lista de extensiones la administra el usuario, no el código."""
+
+    def test_la_migracion_siembra_las_actuales(self):
+        self.assertEqual(
+            ExtensionArchivo.objects.filter(activa=True).count(),
+            len(validadores.EXTENSIONES_POR_OMISION),
+        )
+
+    def test_se_puede_admitir_una_nueva(self):
+        with self.assertRaises(ValidationError):
+            validadores.validar_extension("plano.dwg")
+        ExtensionArchivo.objects.create(extension="dwg", descripcion="Plano CAD")
+        self.assertEqual(validadores.validar_extension("plano.dwg"), ".dwg")
+
+    def test_desactivar_una_la_retira(self):
+        extension = ExtensionArchivo.objects.get(extension=".zip")
+        extension.activa = False
+        extension.save()
+        with self.assertRaises(ValidationError):
+            validadores.validar_extension("todo.zip")
+
+    def test_se_normaliza_al_guardar(self):
+        e = ExtensionArchivo.objects.create(extension="  TIFF ")
+        self.assertEqual(e.extension, ".tiff")
+
+    def test_con_la_tabla_vacia_cae_al_respaldo(self):
+        """Un borrado accidental no puede dejar la plataforma sin subidas."""
+        for e in ExtensionArchivo.objects.all():
+            e.delete()
+        self.assertEqual(
+            validadores.extensiones_permitidas(), validadores.EXTENSIONES_POR_OMISION
+        )
+        self.assertEqual(validadores.validar_extension("a.pdf"), ".pdf")
 
 
 class ReportesTest(ReglaBBaseTest):

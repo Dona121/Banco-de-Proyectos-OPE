@@ -227,6 +227,12 @@ def crear_cuenta(usuario, vigencia, mes, comentario):
     y tras bloquear las filas del periodo, para que dos peticiones simultáneas no
     creen dos.
     """
+    # `CuentaEntrega` no llama a `full_clean()` en su `save()`, y las `choices` de
+    # Django son validación de formulario, no restricción de base: sin esto, un
+    # mes 0, 13 o -1 se guarda tal cual y queda una cuenta de un periodo que no
+    # existe. El formulario lo impide, pero el servicio es quien manda.
+    if mes not in CuentaEntrega.Meses.values:
+        raise ValidationError("El mes de la cuenta no es válido.")
     del_periodo = list(
         CuentaEntrega.objects.select_for_update().filter(
             usuario=usuario, vigencia=vigencia, mes=mes

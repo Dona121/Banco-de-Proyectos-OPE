@@ -71,7 +71,7 @@
           <p class="truncate font-medium text-slate-700 group-hover:text-brand">{{ a.nombre }}</p>
           <p class="truncate text-xs text-slate-400">{{ a.proyecto.nombre }}</p>
         </a>
-        <a href="{% url 'web:entrega_nueva' a.pk %}" class="btn btn-ambar text-xs py-1.5 px-3 shrink-0">Nueva entrega</a>
+        <a href="{% url 'web:actividad_detalle' a.pk %}" class="btn btn-ambar text-xs py-1.5 px-3 shrink-0">Ver actividad</a>
       </div>
       {% empty %}
       <p class="py-8 text-center text-sm text-slate-400">Nada por corregir.</p>
@@ -80,7 +80,7 @@
   </div>
 
   <div class="card p-5">
-    <h2 class="font-head font-semibold text-slate-800 mb-3">Sin ninguna entrega <span class="text-slate-400 font-normal">({{ sin_entrega_count }})</span></h2>
+    <h2 class="font-head font-semibold text-slate-800 mb-3">Pendientes de entregar <span class="text-slate-400 font-normal">({{ sin_entrega_count }})</span></h2>
     <div class="divide-y divide-slate-100">
       {% for a in sin_entrega %}
       <div class="flex items-center justify-between gap-3 py-3">
@@ -88,7 +88,7 @@
           <p class="truncate font-medium text-slate-700 group-hover:text-brand">{{ a.nombre }}</p>
           <p class="truncate text-xs {% if a|vencida %}text-rojo font-semibold{% else %}text-slate-400{% endif %}">Vence {{ a.fecha_vencimiento|date:"d M Y" }}</p>
         </a>
-        <a href="{% url 'web:entrega_nueva' a.pk %}" class="btn btn-soft text-xs py-1.5 px-3 shrink-0">Entregar</a>
+        <a href="{% url 'web:actividad_detalle' a.pk %}" class="btn btn-soft text-xs py-1.5 px-3 shrink-0">Entregar</a>
       </div>
       {% empty %}
       <p class="py-8 text-center text-sm text-slate-400">Todas tus actividades tienen entregas.</p>
@@ -112,8 +112,10 @@
             <td class="text-slate-500">{{ a.proyecto.nombre }}</td>
             <td>{% estado_badge a.estado %}</td>
             <td>
+              {% comment %}Entregar detiene el reloj: se usa el filtro `vencida`, no `dr < 0`, para que En revisión y Aprobada no salgan en rojo.{% endcomment %}
               {% if a.estado == 'AP' %}<span class="text-slate-400">-</span>
-              {% elif dr < 0 %}<span class="text-rojo font-semibold">Vencida</span>
+              {% elif a.estado == 'ER' %}<span class="text-slate-400">En revisión</span>
+              {% elif a|vencida %}<span class="text-rojo font-semibold">Vencida</span>
               {% else %}<span class="text-slate-600">{{ dr }} día{{ dr|pluralize }}</span>{% endif %}
             </td>
           </tr>

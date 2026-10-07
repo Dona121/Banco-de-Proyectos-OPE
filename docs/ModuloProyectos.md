@@ -50,8 +50,8 @@ Roles:
 ### Formulador
 
 * Visualiza sus actividades.
-* Registra entregas.
-* Adjunta documentos.
+* Abre una entrega y adjunta documentos mientras sigue siendo un borrador.
+* **Realiza la entrega** cuando está lista: a partir de ahí queda en firme.
 * Atiende observaciones.
 * Genera nuevas versiones cuando existan ajustes.
 
@@ -81,15 +81,61 @@ Flujo esperado:
 1. Director crea proyecto y asigna coordinador.
 2. Se crea la actividad y se asigna a quien la ejecuta: el coordinador la asigna a
    un formulador; el director puede asignarla a un coordinador o a un formulador.
-3. El responsable (formulador o coordinador) realiza la entrega.
-4. Revisa quien corresponde: el **coordinador** del proyecto si la ejecutó un
+3. El responsable **abre una entrega** y adjunta sus documentos. Mientras tanto la
+   actividad sigue **Pendiente** y la entrega es un borrador que solo ve él.
+4. Pulsa **"Realizar entrega"**: la actividad pasa a **En revisión**.
+5. Revisa quien corresponde: el **coordinador** del proyecto si la ejecutó un
    formulador; el **director** si la ejecutó un coordinador.
-5. Si requiere ajustes:
+6. Si requiere ajustes:
 
-   * Se crea una nueva entrega (la corrige quien la ejecutó).
-6. Si se aprueba:
+   * El ejecutor abre una **versión nueva** (la anterior queda en firme).
+7. Si se aprueba:
 
    * La actividad queda finalizada.
+
+### La entrega tiene dos tiempos: abrirla y realizarla
+
+Abrir la versión y entregarla eran lo mismo, y de ahí salían tres problemas que
+se veían en los datos reales: se podían abrir **varias entregas a la vez** sin
+saber cuál se estaba revisando, se podían **adjuntar documentos a una entrega que
+el revisor ya tenía delante**, y se podía cargar sobre entregas antiguas.
+
+Reglas que lo cierran:
+
+* Solo hay **una entrega abierta** por actividad. Con un borrador abierto no se
+  puede abrir otro, y con una entrega en revisión tampoco.
+* **Realizar la entrega exige al menos un documento.** Una entrega vacía solo
+  puede devolverse, y el ciclo reinicia para nada.
+* Una entrega realizada **no admite cambios**: ni adjuntar, ni quitar, ni subir.
+  Se comprueba en el servidor (`selectors.puede_documentar`), no solo escondiendo
+  el botón: los endpoints de subida directa aceptarían un POST igualmente.
+* Se vuelve a abrir **solo** cuando el revisor marca **Requiere ajustes**, y como
+  una versión nueva.
+
+No hay campo "entregada" en el modelo: `contenido/models.py` es definitivo. El
+estado se **deriva** (ver `web/selectors.py`): una entrega está enviada si tiene
+revisión, o si es la versión vigente de una actividad En revisión. Una versión
+que no es la vigente siempre tiene revisión, así que la regla cierra sola. Eso
+también ordena los datos que dejó el flujo anterior: las entregas simultáneas que
+no son la última quedan **reemplazadas**, ni editables ni revisables.
+
+### La revisión tiene dos salidas, no tres
+
+**Aprobada** y **Requiere ajustes**. "Rechazada" sigue en el modelo (es
+definitivo) pero no se ofrece ni se acepta: hacía exactamente lo mismo que
+Requiere ajustes y tener dos nombres para una sola cosa confundía a quien revisa.
+Lo impiden el formulario, el servicio (`registrar_revision`) y el admin; las
+revisiones históricas que la tengan se siguen mostrando.
+
+### El plazo deja de correr al entregar
+
+Una actividad **En revisión o Aprobada** no se marca vencida aunque su fecha haya
+pasado, se haya entregado a tiempo o tarde: seguir pintándola en rojo es reclamar
+un trabajo que ya se hizo. Si la devuelven (Requiere ajustes) vuelve a contar,
+porque vuelve a estar pendiente. La regla está en el filtro `vencida`
+(`web/templatetags/web_extras.py`) y en `metrics.ESTADOS_SIN_PLAZO`, que alimentan
+las insignias, los contadores de los paneles y los avisos de plazo de la campana:
+si cambia una, hay que cambiar la otra.
 
 ---
 

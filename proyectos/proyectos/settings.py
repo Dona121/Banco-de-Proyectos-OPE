@@ -70,6 +70,10 @@ MIDDLEWARE = [
     # WhiteNoise sirve los estáticos también con DEBUG=False (debe ir justo
     # después de SecurityMiddleware y antes del resto).
     'whitenoise.middleware.WhiteNoiseMiddleware',
+    # Después de WhiteNoise a propósito: los estáticos no lo atraviesan y
+    # conservan su caché larga. Lo que sale de la aplicación, en cambio, no se
+    # guarda en el navegador (ver el porqué en cuentas/middleware.py).
+    'cuentas.middleware.SinCacheDeNavegador',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',

@@ -39,8 +39,15 @@ def resultado_badge(resultado):
 
 @register.filter
 def vencida(actividad):
-    """True si la actividad está vencida y no aprobada."""
-    if actividad.estado == Estado.APROBADA:
+    """True si el plazo sigue corriendo y ya pasó.
+
+    Entregar detiene el reloj: mientras la actividad esté En revisión o
+    Aprobada no se marca vencida, se haya entregado a tiempo o tarde. Seguir
+    pintándola en rojo después de entregar es reclamar un trabajo que ya se
+    hizo. Si la devuelven (Requiere ajustes) vuelve a contar, porque vuelve a
+    estar pendiente.
+    """
+    if actividad.estado in (Estado.EN_REVISION, Estado.APROBADA):
         return False
     return actividad.fecha_vencimiento < timezone.now()
 
