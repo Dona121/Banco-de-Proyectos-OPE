@@ -4,6 +4,14 @@ from django.utils.html import format_html, format_html_join
 
 register = template.Library()
 
+
+@register.filter
+def cc_nombre(cuenta):
+    """Nombre legible de una cuenta: "2026 · Junio" (ver services)."""
+    from cuentas_de_cobro.services import nombre_de_cuenta
+
+    return nombre_de_cuenta(cuenta)
+
 # Mapa código → (etiqueta, clase de badge de app.css). Los códigos los comparten
 # las distintas enumeraciones del módulo (AP/AJ/RE para resultados; PE/NA para
 # estado de documento).

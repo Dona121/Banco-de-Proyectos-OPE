@@ -2,10 +2,14 @@
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.views import View
 from django.views.generic import CreateView, DetailView, ListView
+
+from cuentas.subidas import confirmar_subida, firmar_subida, url_de_descarga
+from cuentas.validadores import validar_extension
 
 from . import selectors, services
 from .forms import (
@@ -34,6 +38,8 @@ from .models import (
     AsignacionRevisor,
     CuentaEntrega,
     DocumentosCuentaCobro,
+    RequisitoDocumental,
+    TramiteFinal,
 )
 from .roles import es_contratista, es_supervisor
 
@@ -51,9 +57,19 @@ class BandejaView(ModuloRequeridoMixin, ListView):
     paginate_by = 15
 
     def get_queryset(self):
-        qs = selectors.cuentas_visibles(self.request.user).order_by("-fecha_creacion")
+        qs = (
+            selectors.cuentas_visibles(self.request.user)
+            # El paso actual de cada fila se calcula sobre estas relaciones: sin
+            # precargarlas, cada cuenta de la página pagaba una decena de consultas.
+            .prefetch_related(*services.RELACIONES_DEL_FLUJO)
+            .order_by("-fecha_creacion")
+        )
         self.f_contratista = self.request.GET.get("contratista", "").strip()
         self.f_estado = self.request.GET.get("estado", "").strip()
+        # El id llega de la querystring: si no es un número, filtrar por él hace
+        # que el ORM lance ValueError y la página responda 500.
+        if not self.f_contratista.isdigit():
+            self.f_contratista = ""
         if self.f_contratista:
             qs = qs.filter(usuario_id=self.f_contratista)
         if self.f_estado == "cerrada":
@@ -68,7 +84,10 @@ class BandejaView(ModuloRequeridoMixin, ListView):
         ctx = super().get_context_data(**kwargs)
         ctx["breadcrumbs"] = [("Cuentas de cobro", None)]
         ctx["puede_crear"] = es_contratista(self.request.user)
-        # Paso actual / responsable / antigüedad por cuenta de la página.
+        # Paso actual / responsable / antigüedad por cuenta de la página. Los
+        # tipos obligatorios se resuelven de una vez para todas: cada fila trae su
+        # propia instancia de la vigencia y pagaría su consulta por separado.
+        services.precargar_tipos_obligatorios(ctx["cuentas"])
         for c in ctx["cuentas"]:
             c.paso = services.paso_actual(c)
         # Opciones de filtro: contratistas presentes en las cuentas visibles.
@@ -123,7 +142,11 @@ class CuentaDetailView(ModuloRequeridoMixin, DetailView):
     context_object_name = "cuenta"
 
     def get_queryset(self):
-        return selectors.cuentas_visibles(self.request.user)
+        # El detalle pinta el flujograma completo, la línea de tiempo y el tablero
+        # de revisiones: las mismas relaciones que la bandeja.
+        return selectors.cuentas_visibles(self.request.user).prefetch_related(
+            *services.RELACIONES_DEL_FLUJO
+        )
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
@@ -171,6 +194,12 @@ class CuentaDetailView(ModuloRequeridoMixin, DetailView):
 
         Resultado = CuentaEntrega.ResultadoRevision
         ctx["es_sup"] = es_supervisor(user)
+        # `puede_cargar` se cierra al entregar; para los textos dirigidos al dueño
+        # de la cuenta (p. ej. "ya entregaste, espera la revisión") hace falta
+        # saber quién es, no si puede cargar.
+        ctx["es_contratista_dueno"] = (
+            es_contratista(user) and selectors.es_dueno(user, cuenta)
+        )
         ctx["puede_cargar"] = selectors.puede_cargar_documentos(user, cuenta)
         ctx["entrega_enviada"] = services.entrega_enviada(cuenta)
         ctx["puede_entregar"] = selectors.puede_entregar(user, cuenta)
@@ -189,6 +218,10 @@ class CuentaDetailView(ModuloRequeridoMixin, DetailView):
         ctx["mis_asignaciones"] = mis
 
         ctx["doc_form"] = DocumentoCuentaForm(cuenta=cuenta)
+        # Tipos que el contratista todavía puede cargar. Se reutiliza el queryset
+        # que ya filtra el formulario (catálogo de la vigencia menos los cargados)
+        # para que la subida directa ofrezca exactamente lo mismo.
+        ctx["tipos_cargables"] = ctx["doc_form"].fields["tipo_documento"].queryset
         ctx["radicacion_form"] = RevisionRadicacionForm()
         ctx["asignacion_form"] = AsignacionForm()
         ctx["reasignacion_form"] = ReasignacionForm()
@@ -199,7 +232,9 @@ class CuentaDetailView(ModuloRequeridoMixin, DetailView):
         ctx["tramite_form"] = TramiteFinalForm()
         ctx["estado_doc_choices"] = DocumentosCuentaCobro.EstadoDocumento.choices
 
-        ctx["breadcrumbs"] = _crumb_base() + [(str(cuenta), None)]
+        ctx["breadcrumbs"] = _crumb_base() + [
+            (services.nombre_de_cuenta(cuenta), None)
+        ]
         return ctx
 
 
@@ -440,6 +475,212 @@ class DocumentoCierreView(RadicacionRequeridoMixin, _AccionCuentaMixin):
         else:
             messages.error(request, "Selecciona el tipo y el archivo.")
         return self.volver(cuenta)
+
+
+# =========================================================================== #
+# Subida directa al bucket (con porcentaje de avance)
+# =========================================================================== #
+# Cada destino dice quién puede subir ahí, en qué carpeta del bucket va el
+# archivo y cómo se registra una vez subido. El archivo NO pasa por el servidor:
+# ver `cuentas/subidas.py` para el por qué y el flujo completo.
+DESTINOS = {
+    "entrega": {
+        "prefijo": "cuentas_cobro/%Y/%m/",
+        "permiso": lambda user, cuenta, datos: selectors.puede_cargar_documentos(
+            user, cuenta
+        ),
+    },
+    "cierre": {
+        "prefijo": "cierres/%Y/%m/",
+        "permiso": lambda user, cuenta, datos: selectors.puede_cargar_cierre(
+            user, cuenta
+        ),
+    },
+    # El trámite no lleva tipo de documento: lleva el tipo de trámite (SF/SC),
+    # que el navegador manda como campo y queda dentro del token firmado.
+    "tramite": {
+        "prefijo": "tramites_finales/%Y/%m/",
+        "permiso": lambda user, cuenta, datos: selectors.puede_responder_tramite(
+            user, cuenta, datos.get("tipo_tramite", "")
+        ),
+    },
+}
+
+
+def _tipo_de_tramite(valor):
+    """Valida el tipo de trámite final (SF/SC) que llega del navegador."""
+    if valor not in TramiteFinal.Tipo.values:
+        raise ValidationError("Tipo de trámite inválido.")
+    return valor
+
+
+def _tipo_de_documento(cuenta, valor):
+    """Valida que el tipo pedido pertenezca al catálogo de la vigencia."""
+    if not str(valor).isdigit():
+        raise ValidationError("Selecciona el tipo de documento.")
+    for tipo in services.tipos_obligatorios(cuenta):
+        if tipo.id == int(valor):
+            return tipo
+    # Los opcionales también valen para la entrega.
+    requisito = RequisitoDocumental.objects.filter(
+        vigencia=cuenta.vigencia, tipo_documento_id=valor
+    ).select_related("tipo_documento").first()
+    if requisito is None:
+        raise ValidationError("Ese tipo de documento no aplica a esta vigencia.")
+    return requisito.tipo_documento
+
+
+class SubidaFirmarView(ModuloRequeridoMixin, _AccionCuentaMixin):
+    """Paso 1: comprueba permisos y devuelve una URL firmada para subir."""
+
+    def post(self, request, pk, destino):
+        cuenta = self.get_cuenta(request, pk)
+        config = DESTINOS.get(destino)
+        if config is None:
+            raise PermissionDenied("Destino de subida desconocido.")
+        _exigir(config["permiso"](request.user, cuenta, request.POST))
+        try:
+            contexto = {"destino": destino, "cuenta": cuenta.pk}
+            if destino == "tramite":
+                contexto["tramite"] = _tipo_de_tramite(request.POST.get("tipo_tramite"))
+            else:
+                contexto["tipo"] = _tipo_de_documento(
+                    cuenta, request.POST.get("tipo_documento", "")
+                ).pk
+            archivo = request.POST.get("nombre", "")
+            validar_extension(archivo)
+            datos = firmar_subida(
+                prefijo=config["prefijo"],
+                nombre_archivo=archivo,
+                content_type=request.POST.get("content_type")
+                or "application/octet-stream",
+                contexto=contexto,
+            )
+        except ValidationError as exc:
+            return JsonResponse({"error": "; ".join(exc.messages)}, status=400)
+        return JsonResponse(datos)
+
+
+class SubidaConfirmarView(ModuloRequeridoMixin, _AccionCuentaMixin):
+    """Paso 3: verifica el objeto en el bucket y crea el registro."""
+
+    def post(self, request, pk, destino):
+        cuenta = self.get_cuenta(request, pk)
+        config = DESTINOS.get(destino)
+        if config is None:
+            raise PermissionDenied("Destino de subida desconocido.")
+        _exigir(config["permiso"](request.user, cuenta, request.POST))
+        try:
+            datos = confirmar_subida(request.POST.get("token", ""))
+            # El token lleva la cuenta y el tipo firmados: así nadie puede
+            # confirmar en otra cuenta un archivo que subió con este permiso.
+            if datos.get("destino") != destino or datos.get("cuenta") != cuenta.pk:
+                raise ValidationError("La confirmación no corresponde a esta cuenta.")
+            if destino == "entrega":
+                services.adjuntar_documento(
+                    services.ultima_entrega(cuenta),
+                    _tipo_de_documento(cuenta, datos["tipo"]),
+                    clave=datos["clave"],
+                )
+            elif destino == "cierre":
+                services.cargar_documento_cierre(
+                    cuenta,
+                    _tipo_de_documento(cuenta, datos["tipo"]),
+                    usuario=request.user,
+                    clave=datos["clave"],
+                )
+            else:
+                comentario = (request.POST.get("comentario") or "").strip()
+                if not comentario:
+                    raise ValidationError("Escribe el detalle de lo realizado.")
+                services.responder_tramite(
+                    cuenta, datos["tramite"], request.user, True,
+                    None, comentario, clave=datos["clave"],
+                )
+        except ValidationError as exc:
+            return JsonResponse({"error": "; ".join(exc.messages)}, status=400)
+        messages.success(request, "Documento cargado.")
+        return JsonResponse({"ok": True})
+
+
+class EliminarArchivoView(ModuloRequeridoMixin, _AccionCuentaMixin):
+    """Quita un documento de la ENTREGA cargado por equivocación, antes de
+    entregarla.
+
+    Los documentos de **cierre** no se quitan, aunque antes se podía: completar
+    el cierre habilita el primer trámite final, y retirar uno después lo
+    deshabilitaba otra vez, dejando la cuenta oscilando entre "lista para
+    SIIFWEB" y "faltan documentos" sin que se viera el porqué.
+
+    ⚠️ La contrapartida, que hay que tener presente: `DocumentoCierre` es único
+    por (cuenta, tipo), así que tampoco se puede volver a cargar ese tipo. Sin
+    borrado, **un cierre mal cargado ya no se corrige desde la aplicación**: hay
+    que entrar al admin. Por eso el cargue avisa antes de confirmar. La salida
+    limpia sería reemplazar el archivo sin borrar la fila (como la evidencia de
+    un trámite), que no descompleta el cierre y por tanto no desestabiliza el
+    flujo.
+
+    Las guardas están en los servicios, que es donde se decide; aquí se
+    comprueba el permiso del objeto.
+    """
+
+    def post(self, request, pk, tipo, doc_pk):
+        cuenta = self.get_cuenta(request, pk)
+        try:
+            if tipo == "documento":
+                documento = get_object_or_404(
+                    DocumentosCuentaCobro.objects.select_related("tipo_documento"),
+                    pk=doc_pk, documento_entrega__cuenta_entrega=cuenta,
+                )
+                _exigir(selectors.puede_eliminar_documento(request.user, documento))
+                nombre = services.eliminar_documento(documento, request.user)
+            else:
+                raise PermissionDenied("Tipo de archivo desconocido.")
+            messages.success(request, f"Se quitó «{nombre}». Puedes cargarlo de nuevo.")
+        except ValidationError as exc:
+            messages.error(request, "; ".join(exc.messages))
+        return self.volver(cuenta)
+
+
+class DescargaView(ModuloRequeridoMixin, _AccionCuentaMixin):
+    """Descarga un archivo de la cuenta con un nombre legible.
+
+    Pasa por el servidor (que redirige al enlace firmado) en vez de poner el
+    enlace del bucket en la plantilla: así se comprueba que quien descarga puede
+    ver esa cuenta, y el archivo baja con un nombre que dice qué es, no con la
+    clave aleatoria con que se guardó.
+    """
+
+    def get(self, request, pk, tipo, doc_pk):
+        cuenta = self.get_cuenta(request, pk)
+        periodo = services.nombre_de_cuenta(cuenta).replace(" · ", " ")
+        if tipo == "documento":
+            doc = get_object_or_404(
+                DocumentosCuentaCobro.objects.select_related("tipo_documento"),
+                pk=doc_pk, documento_entrega__cuenta_entrega=cuenta,
+            )
+            campo, nombre = doc.documento, f"{doc.tipo_documento.nombre} {periodo}"
+        elif tipo == "cierre":
+            doc = get_object_or_404(
+                cuenta.documentocierre_set.select_related("tipo_documento"), pk=doc_pk
+            )
+            campo = doc.documento
+            nombre = f"{doc.tipo_documento.nombre} firmado {periodo}"
+        elif tipo == "evidencia":
+            tramite = get_object_or_404(cuenta.tramites_finales, pk=doc_pk)
+            campo = tramite.evidencia
+            nombre = f"Evidencia {tramite.get_tipo_display()} {periodo}"
+        else:
+            raise PermissionDenied("Tipo de archivo desconocido.")
+
+        extension = (campo.name or "").rsplit(".", 1)
+        if len(extension) == 2:
+            nombre = f"{nombre}.{extension[1]}"
+        try:
+            return redirect(url_de_descarga(campo, nombre))
+        except ValidationError as exc:
+            messages.error(request, "; ".join(exc.messages))
+            return self.volver(cuenta)
 
 
 class TramiteFinalView(TramiteFinalRequeridoMixin, _AccionCuentaMixin):

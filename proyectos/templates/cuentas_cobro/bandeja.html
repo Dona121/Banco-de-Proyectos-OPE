@@ -69,7 +69,7 @@
             {% endif %}
           </td>
           <td>
-            {% if c.paso.cerrada or c.paso.rechazada %}<span class="text-slate-400">—</span>
+            {% if c.paso.cerrada or c.paso.rechazada %}<span class="text-slate-400">-</span>
             {% else %}
               <span class="font-medium text-slate-700">{{ c.paso.siguiente }}</span>
               <p class="text-xs text-slate-400">Responsable: <span class="text-slate-500">{{ c.paso.siguiente_responsable }}</span></p>

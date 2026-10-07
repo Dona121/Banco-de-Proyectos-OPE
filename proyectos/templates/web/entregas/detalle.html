@@ -36,7 +36,14 @@
           </span>
           <span class="truncate font-medium text-slate-700">{{ d.nombre }}</span>
         </div>
-        <a href="{{ d.archivo.url }}" target="_blank" class="text-brand text-sm font-semibold hover:underline shrink-0">Abrir</a>
+        <span class="flex shrink-0 items-center gap-3">
+          <a href="{{ d.archivo.url }}" target="_blank" class="text-brand text-sm font-semibold hover:underline">Abrir</a>
+          <a href="{% url 'web:documento_descargar' d.pk %}" class="text-slate-500 text-sm font-semibold hover:underline">Descargar</a>
+          {% if puede_documentar %}
+          {% url 'web:documento_eliminar' d.pk as u_eliminar_doc %}
+          {% include 'components/eliminar_archivo.html' with accion=u_eliminar_doc %}
+          {% endif %}
+        </span>
       </li>
       {% empty %}
       <li class="py-8 text-center text-sm text-slate-400">Aún no hay documentos adjuntos.</li>
@@ -44,14 +51,9 @@
     </ul>
 
     {% if puede_documentar %}
-    <form method="post" action="{% url 'web:documento_nuevo' entrega.pk %}" enctype="multipart/form-data"
-          class="mt-5 border-t border-slate-100 pt-5 space-y-4">
-      {% csrf_token %}
-      <p class="text-sm font-semibold text-slate-700">Adjuntar documento</p>
-      {% include 'components/form_field.html' with field=documento_form.nombre %}
-      {% include 'components/form_field.html' with field=documento_form.archivo %}
-      <button class="btn btn-soft">Subir documento</button>
-    </form>
+    {% url 'web:subida_firmar' entrega.pk as u_firmar %}
+    {% url 'web:subida_confirmar' entrega.pk as u_confirmar %}
+    {% include 'components/subida_directa.html' with firmar_url=u_firmar confirmar_url=u_confirmar tipos=None con_nombre=1 boton="Subir documento" %}
     {% endif %}
   </div>
 

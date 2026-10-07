@@ -1,4 +1,4 @@
-# Banproe — Gestión de Proyectos (Gobernación de Sucre)
+# Banproe: Gestión de Proyectos (Gobernación de Sucre)
 
 Plataforma web en Django para la gestión de proyectos de la Gobernación de Sucre.
 Incluye el módulo **Gestión de cuentas de cobro**, que cubre el flujo completo de
@@ -9,11 +9,16 @@ cierre y trámites finales.
 ## Stack
 
 - **Python** ≥ 3.13 · **Django** 5.2
-- **Base de datos:** SQLite (desarrollo)
-- **Frontend:** Django Templates + Tailwind (CDN) + Alpine.js + HTMX (sin build/Node)
+- **Base de datos:** PostgreSQL en Supabase (`DATABASE_URL`); SQLite si no está definida
+- **Frontend:** Django Templates + Tailwind **compilado** + Alpine.js + HTMX (sin Node)
 - **Admin:** Django Unfold
-- **Dependencias clave:** `django-unfold`, `django-import-export`, `openpyxl`, `reportlab`
+- **Dependencias clave:** `django-unfold`, `django-storages`, `openpyxl`, `reportlab`
 - **Gestor de entorno/paquetes:** [uv](https://docs.astral.sh/uv/) (`pyproject.toml` + `uv.lock`)
+
+> El CSS de Tailwind está **compilado y versionado** en
+> `proyectos/static/web/tailwind.css`; no se carga del CDN. Si cambias clases en
+> una plantilla hay que recompilarlo (ver `CLAUDE.md`). Alpine y HTMX también se
+> sirven desde `static/vendor/`, con versión fija.
 
 ## Estructura
 
@@ -47,21 +52,31 @@ Requiere [uv](https://docs.astral.sh/uv/) instalado.
 # 1. Instalar dependencias (crea .venv a partir de uv.lock)
 uv sync
 
-# 2. Aplicar migraciones
-uv run python proyectos/manage.py migrate
+# 2. Configurar el entorno: copiar la plantilla y rellenarla
+cp .env.example proyectos/.env    # SECRET_KEY es obligatoria
 
-# 3. Crear un superusuario (opcional, para el admin)
-uv run python proyectos/manage.py createsuperuser
+# 3. Entrar a proyectos/: `load_dotenv()` busca el .env desde el directorio
+#    actual, así que desde la raíz NO lo encuentra
+cd proyectos
 
-# 4. Levantar el servidor de desarrollo
-uv run python proyectos/manage.py runserver
+# 4. Aplicar migraciones y crear un superusuario (opcional, para el admin)
+uv run python manage.py migrate
+uv run python manage.py createsuperuser
+
+# 5. Levantar el servidor de desarrollo
+uv run python manage.py runserver
 ```
 
-La aplicación queda en `http://127.0.0.1:8000/` y el admin en `/admin/`.
+La aplicación queda en `http://127.0.0.1:8000/` (por **http**, no https) y el
+admin en `/admin/`.
+
+> Para trabajar en local conviene `HTTPS_ESTRICTO=0` (si no, las cookies `Secure`
+> impiden iniciar sesión) y `DEBUG=1` (así los estáticos no necesitan
+> `collectstatic`). Con `DATABASE_URL` vacía se usa la SQLite local.
 
 > Alternativa sin `uv run`: activa el entorno (`source .venv/Scripts/activate` en
-> Git Bash / `.venv\Scripts\Activate.ps1` en PowerShell), ubícate en `proyectos/`
-> y usa `python manage.py …`.
+> Git Bash / `.venv\Scripts\Activate.ps1` en PowerShell) y usa
+> `python manage.py …`.
 
 ## Módulo de cuentas de cobro
 
@@ -85,9 +100,11 @@ migraciones de datos.
 ### Flujo
 
 1. El contratista crea la cuenta, carga sus documentos y pulsa **Entregar**.
+   Hay una sola cuenta vigente por vigencia y mes: si la anterior quedó
+   **rechazada** puede volver a presentarla; si fue **aprobada**, no.
 2. El supervisor o el rol de radicación aprueban la **radicación**.
 3. El supervisor asigna tres revisores y se revisa en orden estricto
-   **jurídico → administrativo → técnico**.
+   **técnico → jurídico → administrativo**.
 4. Ante cualquier devolución, el flujo reinicia por completo: el sistema genera
    una nueva versión vacía y el contratista vuelve a entregar el paquete completo.
 5. El supervisor aprueba **para firma** (no carga documentos).
@@ -102,10 +119,14 @@ línea de tiempo de trazabilidad y un panel de notificaciones derivado del estad
 
 ## Tests
 
+Córrelos siempre con el módulo de settings de prueba, desde `proyectos/`:
+
 ```bash
-uv run python proyectos/manage.py test cuentas_de_cobro
+cd proyectos
+uv run python manage.py test --settings=proyectos.test_settings
 ```
 
-> Los tests con `FileField` escriben en `proyectos/media/` (subcarpetas
-> `cuentas_cobro/`, `cierres/`, `tramites_finales/`); conviene limpiarlas tras
-> correrlos.
+> `proyectos/test_settings.py` fija SQLite en memoria y almacenamiento de
+> archivos en memoria. Sin él, el suite crea la base de pruebas **en el servidor
+> de Supabase** y cualquier test con `FileField` **sube el archivo al bucket de
+> producción**.

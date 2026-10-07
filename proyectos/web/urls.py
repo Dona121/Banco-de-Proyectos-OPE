@@ -28,6 +28,16 @@ urlpatterns = [
     path("entregas/<int:pk>/", views.EntregaDetailView.as_view(), name="entrega_detalle"),
     path("entregas/<int:entrega_pk>/documentos/nuevo/",
          views.DocumentoCreateView.as_view(), name="documento_nuevo"),
+    # Subida directa al bucket: el archivo no pasa por el servidor.
+    path("entregas/<int:entrega_pk>/subir/firmar/",
+         views.SubidaFirmarView.as_view(), name="subida_firmar"),
+    path("entregas/<int:entrega_pk>/subir/confirmar/",
+         views.SubidaConfirmarView.as_view(), name="subida_confirmar"),
+    # Descarga con nombre legible, comprobando antes que la entrega sea visible.
+    path("documentos/<int:pk>/descargar/",
+         views.DescargaDocumentoView.as_view(), name="documento_descargar"),
+    path("documentos/<int:pk>/eliminar/",
+         views.DocumentoEliminarView.as_view(), name="documento_eliminar"),
     path("entregas/<int:entrega_pk>/revisar/",
          views.RevisionCreateView.as_view(), name="revision_nueva"),
 

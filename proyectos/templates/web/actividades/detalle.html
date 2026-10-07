@@ -46,7 +46,7 @@
           {% if ev.tipo == 'entrega' %}
           <span class="timeline-dot dot-entrega"></span>
           <a href="{% url 'web:entrega_detalle' ev.obj.pk %}"
-             class="group relative block rounded-lg border border-azul/25 border-l-[3px] border-l-azul bg-azul-light/40 p-4 pr-11 shadow-sm transition hover:border-azul/50 hover:bg-azul-light hover:shadow-md">
+             class="group relative block rounded-lg border border-azul/25 border-l-[3px] border-l-azul bg-azul-light/40 p-4 pr-11 shadow-sm transition hover:border-azul/50 hover:bg-azul-light">
             <div class="flex items-center justify-between gap-2">
               <div class="flex items-center gap-2">
                 <span class="inline-flex items-center rounded-md bg-azul px-2 py-0.5 text-xs font-bold text-white">v{{ ev.obj.numero_version }}</span>

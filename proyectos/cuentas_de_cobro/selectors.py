@@ -72,8 +72,20 @@ def es_dueno(user, cuenta):
 
 
 def puede_cargar_documentos(user, cuenta):
-    """Solo el contratista dueño carga documentos. Bloqueado tras aprobación."""
+    """Solo el contratista dueño carga documentos, y solo mientras la versión
+    actual siga abierta.
+
+    Pulsar "Entregar" congela el paquete. Mientras esto no se comprobaba, un POST
+    directo podía colar un documento en una versión ya entregada: entraba en
+    PENDIENTE y dejaba al revisor de turno sin ninguna acción válida: no podía
+    aprobar (hay un pendiente) ni devolver (no hay ninguno rechazado). Tras una
+    devolución nace una versión nueva, sin enviar, y el cargue se reabre solo.
+    """
     if cuenta.estado_supervisor == _AP:
+        return False
+    if services.radicacion_rechazada(cuenta):
+        return False
+    if services.entrega_enviada(cuenta):
         return False
     return es_contratista(user) and es_dueno(user, cuenta)
 
@@ -86,6 +98,22 @@ def puede_entregar(user, cuenta):
     if services.documentos_faltantes(cuenta):
         return False
     return not services.entrega_enviada(cuenta)
+
+
+def puede_eliminar_documento(user, documento):
+    """Quitar un documento de la entrega: lo mismo que hace falta para cargarlo.
+
+    Si el paquete sigue abierto para añadir, también lo está para corregir un
+    cargue equivocado; en cuanto se entrega, queda congelado para las dos cosas.
+    """
+    return puede_cargar_documentos(user, documento.documento_entrega.cuenta_entrega)
+
+
+# Un documento de cierre NO se quita. Se permitió un tiempo, para corregir un
+# cargue equivocado, y resultó contraproducente: completar el cierre habilita el
+# primer trámite final, y retirar un documento después lo deshabilitaba, de modo
+# que la cuenta parecía trabada. Además `DocumentoCierre` es único por (cuenta,
+# tipo), así que tras borrarlo tampoco se podía recargar el mismo tipo.
 
 
 def puede_radicar(user, cuenta):
@@ -151,12 +179,9 @@ def puede_cargar_cierre(user, cuenta):
     return bool(services.documentos_cierre_faltantes(cuenta))
 
 
-def puede_responder_tramite(user, cuenta, tipo):
-    """Cada trámite final solo lo responde su rol, y solo si está habilitado."""
-    if tipo not in TramiteFinal.Tipo.values:
-        return False
-    if not services.tramite_habilitado(cuenta, tipo):
-        return False
+def _es_el_rol_del_tramite(user, cuenta, tipo):
+    """A quién le toca ese trámite: secop el de SECOP II, el revisor
+    administrativo de la cuenta el de SIIFWEB."""
     Tipo = TramiteFinal.Tipo
     if tipo == Tipo.CARGUE_SECOP:
         return es_secop(user)
@@ -167,6 +192,23 @@ def puede_responder_tramite(user, cuenta, tipo):
             revisor=user,
         ).exists()
     return False
+
+
+def puede_responder_tramite(user, cuenta, tipo):
+    """Cada trámite final solo lo responde su rol, y solo si está habilitado."""
+    if tipo not in TramiteFinal.Tipo.values:
+        return False
+    if not services.tramite_habilitado(cuenta, tipo):
+        return False
+    return _es_el_rol_del_tramite(user, cuenta, tipo)
+
+
+# La evidencia de un trámite respondido NO se reemplaza. Existió un tiempo, para
+# corregir una captura equivocada, con una ventana que se cerraba al responder el
+# trámite siguiente. Se retiró porque el cargue pide confirmación antes de
+# registrar nada: ahí es donde se evita el archivo equivocado, y un soporte que se
+# puede cambiar después debilita el valor probatorio del expediente. Un error que
+# se detecte más tarde se corrige por el admin, no por la aplicación.
 
 
 # --------------------------------------------------------------------------- #
@@ -209,11 +251,25 @@ def tramites_finales(cuenta):
         TramiteFinal.Tipo.CARGUE_SIIFWEB: "¿Se cargó a SIIFWEB?",
         TramiteFinal.Tipo.CARGUE_SECOP: "¿Se cargó a SECOP II?",
     }
+    # Lo que el usuario lee justo antes de confirmar. Responder un trámite no se
+    # deshace, y el último además cierra la cuenta: conviene decirlo ahí, no en
+    # un manual que nadie tiene abierto en ese momento.
+    avisos = {
+        TramiteFinal.Tipo.CARGUE_SIIFWEB: (
+            "Al confirmar, el paso queda registrado como realizado. Después solo "
+            "podrás cambiar el soporte hasta que se responda el cargue en SECOP II."
+        ),
+        TramiteFinal.Tipo.CARGUE_SECOP: (
+            "Al confirmar, el paso queda registrado y la cuenta se cierra. El "
+            "soporte ya no se podrá cambiar."
+        ),
+    }
     for tipo in services.SECUENCIA_TRAMITES:
         filas.append({
             "tipo": tipo,
             "tipo_label": TramiteFinal.Tipo(tipo).label,
             "pregunta": preguntas[tipo],
+            "aviso": avisos[tipo],
             "tramite": services.tramite_de(cuenta, tipo),
             "habilitado": services.tramite_habilitado(cuenta, tipo),
             "realizado": services.tramite_realizado(cuenta, tipo),

@@ -7,8 +7,8 @@ pone en marcha automáticamente).
 
 La plataforma tiene **dos aplicaciones independientes**:
 
-1. **Proyectos** — gestión de proyectos, actividades y subactividades.
-2. **Cuentas de cobro** — el trámite mensual de la cuenta de cobro de los contratistas.
+1. **Proyectos**: gestión de proyectos, actividades y subactividades.
+2. **Cuentas de cobro**: el trámite mensual de la cuenta de cobro de los contratistas.
 
 > **Importante: las dos aplicaciones están separadas.** Los roles **no se cruzan**.
 > Quien tiene un rol de Proyectos solo ve y usa la aplicación de Proyectos; quien
@@ -40,6 +40,14 @@ corresponde según quién la hizo.
 Director → Coordinador → (ejecuta) Formulador o Coordinador
                        → (revisa) Coordinador o Director → Fin
 ```
+
+**En la pantalla de Proyectos** hay un buscador y tres listas desplegables para
+filtrar por **director**, **coordinador** y **formulador**. Cada lista ofrece
+únicamente a las personas que de verdad aparecen en los proyectos que esa persona
+puede ver, así que ninguna selección devuelve una pantalla vacía. Los filtros se
+conservan al pasar de página. En la misma pantalla, el botón **"Flujograma del
+proceso"** abre el diagrama del recorrido completo: proyecto → actividad →
+subactividad → entrega → revisión.
 
 ## Director
 
@@ -118,7 +126,11 @@ actividad para **ejecutarla** él mismo.
 **En qué procesos participa y qué hace:**
 1. **Realizar la actividad.** Hace el trabajo de la actividad (y de sus
    subactividades, si las tiene).
-2. **Entregar.** Sube la entrega con los documentos de soporte.
+2. **Entregar.** Sube la entrega con los documentos de soporte. Mientras el archivo
+   sube se ve el porcentaje y puede **cancelar**; si se equivocó de archivo, puede
+   **quitarlo** y volver a subirlo mientras **la actividad no esté aprobada** (una
+   actividad aprobada cierra el expediente y sus soportes ya no se tocan). Cada
+   documento se puede **abrir o descargar**.
 3. **Corregir.** Si le piden ajustes, corrige y vuelve a entregar.
 
 **Qué se activa cuando actúa:**
@@ -146,7 +158,7 @@ de cierre (los mismos de la cuenta, ahora firmados); y por último se hacen dos
 
 ```
 Contratista → (1ª revisión) Radicación/Supervisor → Supervisor nombra revisores
-→ Revisores: jurídico → administrativo → técnico → Supervisor (decisión final)
+→ Revisores: técnico → jurídico → administrativo → Supervisor (decisión final)
 → Radicación (documentos de cierre firmados) → Rev. administrativo → Secop → Cierre
 ```
 
@@ -161,13 +173,17 @@ Contratista → (1ª revisión) Radicación/Supervisor → Supervisor nombra rev
 
 **Qué puede hacer (permisos):**
 - Crear su cuenta de cobro del mes.
-- Subir los documentos que se le piden.
+- Subir los documentos que se le piden, descargarlos y quitarlos si se equivocó.
 - Entregar la cuenta para que la revisen.
 - Ver únicamente **sus propias** cuentas.
 
 **En qué procesos participa y qué hace:**
 1. **Crear la cuenta** del mes (vigencia y mes).
-2. **Subir los documentos** obligatorios.
+2. **Subir los documentos** obligatorios. Mientras el archivo sube se ve el
+   porcentaje y hay un botón para **cancelar**. Si se equivocó de archivo, puede
+   **quitarlo** y volver a subirlo, siempre **antes de entregar**: una vez entregada,
+   la cuenta queda congelada para que los revisores trabajen sobre un paquete que no
+   cambia.
 3. **Entregar.** Cuando están todos, presiona **Entregar** para mandarlos a revisión.
 4. **Corregir** (si le devuelven la cuenta): sube de nuevo todos los documentos y
    vuelve a entregar.
@@ -175,6 +191,10 @@ Contratista → (1ª revisión) Radicación/Supervisor → Supervisor nombra rev
 **Qué se activa cuando actúa:**
 - Al **entregar**, la cuenta queda lista para la primera revisión y la pueden ver
   Radicación y el Supervisor.
+
+> **Si una cuenta del mes fue rechazada, puede volver a presentarla.** Solo bloquean
+> el mes una cuenta ya aprobada (ese periodo ya se tramitó) o una que siga en
+> trámite.
 
 ## Radicación
 
@@ -195,12 +215,18 @@ aprobación del supervisor, carga los documentos de cierre ya firmados.
 2. **Documentos de cierre firmados.** Después de que el supervisor aprueba, sube los
    mismos documentos de la cuenta, ahora firmados, hasta completar los obligatorios.
 
+   ⚠️ **Un documento de cierre no se puede quitar después.** Revisa el archivo en la
+   pantalla de confirmación antes de enviarlo. Si aun así se carga uno equivocado,
+   hay que pedir apoyo al administrador del sistema: no hay forma de corregirlo
+   desde la aplicación.
+
 **Qué se activa cuando actúa:**
 - Al **aprobar** la primera revisión, la cuenta queda lista para que el supervisor
   nombre a los revisores.
 - Al **pedir ajustes**, la cuenta vuelve al contratista y el trámite reinicia.
 - Al **completar los documentos de cierre firmados**, se habilitan los pasos finales
-  (empezando por el cargue en SIIFWEB).
+  (empezando por el cargue en SIIFWEB) **y le llega un aviso al contratista** de que
+  ya están cargados.
 
 ## Supervisor
 
@@ -240,9 +266,9 @@ nombrarlas.
 
 **En qué procesos participan y qué hacen:**
 1. **Revisión en orden.** Cada persona revisa solo cuando la anterior ya aprobó:
-   - **1.º** la revisión **jurídica**,
-   - **2.º** la **administrativa**,
-   - **3.º** la **técnica**.
+   - **1.º** la revisión **técnica**,
+   - **2.º** la **jurídica**,
+   - **3.º** la **administrativa**.
    En su turno deciden: **Aprobado** (pasa al siguiente) o **piden ajustes / no
    aprueban** (la cuenta se devuelve). Para poder **aprobar**, antes deben dejar
    cada documento marcado como *Aprobado* o *No aplica*: no se puede aprobar la
@@ -250,11 +276,13 @@ nombrarlas.
 2. **Declinar** (si no pueden): el supervisor pondrá a otra persona en ese rol.
 
 **Qué se activa cuando actúan:**
-- Al **aprobar** el jurídico, se habilita el administrativo; al aprobar el
-  administrativo, se habilita el técnico.
+- Al **aprobar** el técnico, se habilita el jurídico; al aprobar el jurídico, se
+  habilita el administrativo.
 - Cuando **los tres aprueban**, la cuenta pasa sola a la decisión del supervisor.
 - Si **cualquiera pide ajustes o no aprueba**, la cuenta vuelve al contratista y,
-  al corregir, la revisión **empieza de nuevo desde el jurídico**.
+  al corregir, la revisión **empieza de nuevo desde el técnico**.
+- Mientras el contratista no vuelva a entregar, **nadie puede revisar**: la pantalla
+  de revisión no aparece, porque todavía no hay documentos que mirar.
 - Además, el **revisor administrativo** tiene a su cargo uno de los pasos finales
   (ver abajo): confirmar que la cuenta se subió al sistema SIIFWEB.
 
@@ -278,11 +306,19 @@ proceso.
 Después de que **Radicación** sube los documentos de cierre firmados, se hacen dos
 pasos, **uno después de otro**, y cada uno con su soporte:
 
-1. **Revisor administrativo** — confirma que la cuenta se subió al sistema SIIFWEB.
-2. **Secop** — confirma que la cuenta se publicó en el portal SECOP II.
+1. **Revisor administrativo**: confirma que la cuenta se subió al sistema SIIFWEB.
+2. **Secop**: confirma que la cuenta se publicó en el portal SECOP II.
 
 Cuando se cumplen los dos, **el sistema cierra la cuenta automáticamente**. Fin
 del proceso.
+
+⚠️ **El soporte de estos pasos no se puede cambiar después.** Una vez marcas el paso
+como realizado, el archivo que adjuntaste queda así.
+
+Por eso, antes de enviarlo, la pantalla te muestra **qué archivo y qué comentario
+vas a registrar** y te pide confirmar. Ahí es donde hay que revisar: hasta ese
+momento puedes cambiar el archivo las veces que quieras, y no se ha registrado
+nada. Si aun así quedó mal, hay que pedir apoyo al administrador del sistema.
 
 ## Avisos automáticos en Cuentas de cobro
 
@@ -290,6 +326,20 @@ A cada persona le aparecen avisos según lo que le toca: cuando le asignan una
 cuenta para revisar, cuando hay algo pendiente de revisar, cuando una cuenta fue
 devuelta y cuando algo queda aprobado. Así cada quien sabe qué le toca hacer sin
 tener que estar buscando.
+
+El **contratista** recibe además un aviso cuando Radicación termina de cargar los
+documentos de cierre firmados. Antes se quedaba sin noticias desde que el supervisor
+aprobaba hasta que la cuenta se cerraba.
+
+**En cualquier pantalla, cada archivo adjunto se puede abrir o descargar**, y baja
+con un nombre que dice qué es ("Cuenta de cobro 2026 Octubre.pdf"), no con un código.
+
+**Y en todos los cargues el botón no envía de una vez:** primero muestra un resumen
+con el archivo elegido y los datos escritos, y pregunta si confirmas. Hasta ese
+momento el archivo no ha salido de tu computador, así que **"Volver a elegir" no
+deja nada a medias**: puedes cambiar el archivo las veces que necesites. En los
+pasos que no se pueden deshacer, el resumen avisa además de lo que va a ocurrir al
+confirmar.
 
 ---
 
@@ -328,6 +378,6 @@ está, en modo solo lectura.
 | Cuentas de cobro | **Contratista** | Arma su cuenta del mes y la entrega. |
 | Cuentas de cobro | **Radicación** | Hace la primera revisión y carga los documentos de cierre firmados. |
 | Cuentas de cobro | **Supervisor** | Nombra revisores y da la decisión final. |
-| Cuentas de cobro | **Revisores** | Revisan en orden: jurídico, administrativo y técnico. |
+| Cuentas de cobro | **Revisores** | Revisan en orden: técnico, jurídico y administrativo. |
 | Cuentas de cobro | **Secop** | Publica la cuenta en SECOP II y se cierra el proceso. |
 | Transversal | **Consulta** | Ve toda la información de las dos aplicaciones en modo solo lectura; no realiza ninguna acción. |

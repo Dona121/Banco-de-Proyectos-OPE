@@ -59,7 +59,7 @@ def registrar_revision(entrega, revisor, resultado, comentario):
 
 
 # --------------------------------------------------------------------------- #
-# Notificaciones derivadas (sin modelo) — pendientes accionables por usuario.
+# Notificaciones derivadas (sin modelo): pendientes accionables por usuario.
 # Color por tipo: asignación=azul, revisión=verde, devolución=rojo, plazo=ámbar.
 # --------------------------------------------------------------------------- #
 NOTIF_ASIGNACION = "asignacion"
@@ -95,7 +95,7 @@ def notificaciones_para(user):
             if not p.actividades_set.exists():
                 items.append(_notif(
                     NOTIF_ASIGNACION,
-                    f"Proyecto asignado: agrega sus actividades — {p.nombre}",
+                    f"Proyecto asignado: agrega sus actividades, {p.nombre}",
                     reverse("web:proyecto_detalle", args=[p.pk]),
                     p.nombre,
                 ))
@@ -130,7 +130,7 @@ def notificaciones_para(user):
     ).select_related("proyecto"):
         items.append(_notif(
             NOTIF_ASIGNACION,
-            f"Actividad asignada: realízala y entrégala — {a.nombre}",
+            f"Actividad asignada: realízala y entrégala ({a.nombre}",
             reverse("web:actividad_detalle", args=[a.pk]),
             a.proyecto.nombre,
         ))
@@ -139,7 +139,7 @@ def notificaciones_para(user):
     ).select_related("proyecto"):
         items.append(_notif(
             NOTIF_DEVOLUCION,
-            f"Te pidieron ajustes: corrige y vuelve a entregar — {a.nombre}",
+            f"Te pidieron ajustes: corrige y vuelve a entregar) {a.nombre}",
             reverse("web:actividad_detalle", args=[a.pk]),
             a.proyecto.nombre,
         ))

@@ -1,0 +1,18 @@
+{% comment %}
+Botón para quitar un archivo cargado, con confirmación en dos pasos: el primer
+clic pide confirmar y el segundo envía. Sin `confirm()` del navegador, que bloquea
+la página, y sin modal, que aquí sería desproporcionado.
+Parámetros: `accion` (URL del POST) y, opcional, `etiqueta`.
+{% endcomment %}
+<span x-data="{ confirmando: false }" class="inline-flex items-center gap-2">
+  <button type="button" @click="confirmando = true" x-show="!confirmando"
+          class="text-rojo text-sm font-semibold hover:underline">{{ etiqueta|default:"Eliminar" }}</button>
+  <form method="post" action="{{ accion }}" x-show="confirmando" style="display:none"
+        class="inline-flex items-center gap-2">
+    {% csrf_token %}
+    <span class="text-xs text-slate-500">¿Quitar?</span>
+    <button class="text-rojo text-sm font-semibold hover:underline">Sí</button>
+    <button type="button" @click="confirmando = false"
+            class="text-slate-500 text-sm font-semibold hover:underline">No</button>
+  </form>
+</span>

@@ -1,4 +1,4 @@
-"""Django Admin — herramienta técnica de administración y parametrización.
+"""Django Admin: herramienta técnica de administración y parametrización.
 
 NO es la interfaz de negocio (esa es la app web). Aquí los superusuarios y el
 personal de soporte parametrizan, auditan y corrigen datos sobre TODOS los
@@ -221,7 +221,7 @@ class UserAdmin(DjangoUserAdmin, ModelAdmin):
 
     @display(description=_("Roles"))
     def mostrar_roles(self, obj):
-        return ", ".join(obj.groups.values_list("name", flat=True)) or "—"
+        return ", ".join(obj.groups.values_list("name", flat=True)) or "-"
 
 
 @admin.register(Group)

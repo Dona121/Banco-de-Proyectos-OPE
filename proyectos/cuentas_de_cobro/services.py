@@ -20,6 +20,7 @@ vistas son delgadas y solo invocan estas funciones. Decisiones de diseño:
   de versiones anteriores.
 """
 from django.core.exceptions import ValidationError
+from django.core.files.storage import default_storage
 from django.db import IntegrityError, transaction
 from django.urls import reverse
 
@@ -75,6 +76,8 @@ class Eventos:
     RAD_DEVOLUCION = "Devolución en radicación (requiere ajustes)"
     RAD_RECHAZADA = "Radicación rechazada"
     DOC_NO_APLICA = "Documento marcado no aplica"
+    DOC_ELIMINADO = "Documento retirado por el contratista"
+    CIERRE_ELIMINADO = "Documento de cierre retirado"
     NUEVA_VERSION = "Nueva versión generada"
 
     REVISORES_ASIGNADOS = "Revisores asignados"
@@ -87,6 +90,7 @@ class Eventos:
     SUP_RECHAZADO = "Rechazado por supervisor"
 
     CIERRE_CARGADOS = "Documentos de cierre firmados cargados"
+    EVIDENCIA_REEMPLAZADA = "Evidencia de trámite reemplazada"
     TF_SIIFWEB = "Cargue en SIIFWEB registrado"
     TF_SECOP = "Cargue en SECOP II registrado"
     CERRADO = "Trámite cerrado"
@@ -122,14 +126,56 @@ def es_devolucion(evento):
 # --------------------------------------------------------------------------- #
 # Utilidades
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# Lectura del estado del flujo
+# --------------------------------------------------------------------------- #
+# Las funciones de esta sección resuelven cada dato con ``.all()`` y filtran en
+# Python, en vez de usar ``.filter()/.exists()``, que siempre van a la base. Así
+# una vista que precargue las relaciones (ver RELACIONES_DEL_FLUJO) las sirve sin
+# una sola consulta extra, mientras quien no precargue nada se comporta igual que
+# antes. Los volúmenes por cuenta son de decenas de filas (es el expediente de un
+# mes de un contratista), así que filtrar en memoria no cuesta nada.
+#
+# OJO: no memorizar estos resultados en la instancia. Hay servicios que consultan,
+# mutan y vuelven a consultar (``responder_tramite`` relee ``tramite_realizado``
+# para decidir si cierra la cuenta), y un valor memorizado dejaría la cuenta sin
+# cerrar. Con ``.all()`` eso no pasa: los objetos que llegan a los servicios no
+# traen precarga, así que cada llamada va a la base.
+RELACIONES_DEL_FLUJO = (
+    "documentoentrega_set",
+    "documentoentrega_set__revisioncuentacobro_set",
+    "eventos",
+    "revisionpararadicacion_set",
+    "asignacionrevisor_set",
+    "documentocierre_set",
+    "tramites_finales",
+)
+
+
 def ultima_entrega(cuenta):
     """Última versión de `DocumentoEntrega` de la cuenta (o None)."""
-    return cuenta.documentoentrega_set.order_by("-numero_version").first()
+    entregas = cuenta.documentoentrega_set.all()
+    return max(entregas, key=lambda e: e.numero_version, default=None)
 
 
 def _lock(cuenta):
     """Re-lee la cuenta con bloqueo para transiciones de estado."""
     return CuentaEntrega.objects.select_for_update().get(pk=cuenta.pk)
+
+
+def _asignar_archivo(campo, archivo, clave):
+    """Pone en un ``FileField`` un archivo recién subido o uno que ya está arriba.
+
+    Con ``clave`` solo se guarda la ruta dentro del bucket: el navegador ya subió
+    el archivo directamente y volver a transferirlo no tendría sentido. Asignar
+    ``.name`` es la forma de hacerlo sin tocar los modelos, que son definitivos.
+    """
+    if clave:
+        campo.name = clave
+    elif archivo is not None:
+        campo.save(archivo.name, archivo, save=False)
+    else:
+        raise ValidationError("No se recibió ningún archivo.")
 
 
 def registrar_evento(cuenta, actor, etapa, evento, detalle=""):
@@ -142,24 +188,63 @@ def registrar_evento(cuenta, actor, etapa, evento, detalle=""):
 # --------------------------------------------------------------------------- #
 # 1. Cargue, entrega y radicación
 # --------------------------------------------------------------------------- #
+def cuenta_rechazada(cuenta):
+    """True si la cuenta terminó rechazada y no continúa.
+
+    Son los dos rechazos terminales del flujo: el definitivo en radicación y el
+    del supervisor en su decisión final.
+    """
+    return (
+        cuenta.estado_supervisor == CuentaEntrega.ResultadoRevision.RECHAZADA
+        or radicacion_rechazada(cuenta)
+    )
+
+
+def cuenta_aprobada(cuenta):
+    """True si el supervisor aprobó la cuenta (siga en cierre/trámites o ya cerrada)."""
+    return (
+        cuenta.estado_supervisor == CuentaEntrega.ResultadoRevision.APROBADA
+        or cuenta.fecha_cierre is not None
+    )
+
+
 @transaction.atomic
 def crear_cuenta(usuario, vigencia, mes, comentario):
     """Crea la cuenta del contratista junto con su primera entrega (versión 1).
 
-    Un contratista tiene UNA cuenta por vigencia y mes. La unicidad no se puede
-    imponer con una restricción de base de datos porque ``models.py`` es
-    definitivo, así que se valida aquí, dentro de la transacción y tras bloquear
-    las filas del periodo, para que dos peticiones simultáneas no creen dos.
+    Un contratista tiene una sola cuenta **vigente** por vigencia y mes, y lo que
+    cuenta es el estado, no la simple existencia:
+
+    * una cuenta **rechazada** (en radicación o por el supervisor) no bloquea: el
+      contratista puede volver a presentar la cuenta de ese periodo;
+    * una cuenta **aprobada** sí bloquea: ese periodo ya se tramitó y no se
+      presenta dos veces;
+    * una cuenta **en trámite** también bloquea, porque tener dos abiertas del
+      mismo periodo dejaría el flujo sin un responsable claro.
+
+    La regla no se puede imponer con una restricción de base de datos porque
+    ``models.py`` es definitivo, así que se valida aquí, dentro de la transacción
+    y tras bloquear las filas del periodo, para que dos peticiones simultáneas no
+    creen dos.
     """
-    duplicada = (
-        CuentaEntrega.objects.select_for_update()
-        .filter(usuario=usuario, vigencia=vigencia, mes=mes)
-        .exists()
+    del_periodo = list(
+        CuentaEntrega.objects.select_for_update().filter(
+            usuario=usuario, vigencia=vigencia, mes=mes
+        )
     )
-    if duplicada:
+    bloqueantes = [c for c in del_periodo if not cuenta_rechazada(c)]
+    if bloqueantes:
+        periodo = (
+            f"{vigencia.vigencia} - {dict(CuentaEntrega.Meses.choices).get(mes, mes)}"
+        )
+        if any(cuenta_aprobada(c) for c in bloqueantes):
+            raise ValidationError(
+                f"Ya tienes una cuenta de cobro aprobada para {periodo}: ese "
+                f"periodo ya se tramitó y no admite otra cuenta."
+            )
         raise ValidationError(
-            f"Ya tienes una cuenta de cobro para {vigencia.vigencia} - "
-            f"{dict(CuentaEntrega.Meses.choices).get(mes, mes)}."
+            f"Ya tienes una cuenta de cobro en trámite para {periodo}. Espera a "
+            f"que termine su revisión antes de presentar otra."
         )
     cuenta = CuentaEntrega.objects.create(
         usuario=usuario, vigencia=vigencia, mes=mes, comentario=comentario or ""
@@ -174,26 +259,121 @@ def crear_cuenta(usuario, vigencia, mes, comentario):
     return cuenta
 
 
-def adjuntar_documento(entrega, tipo_documento, archivo):
-    """Adjunta un documento de un tipo a la entrega (estado inicial: Pendiente)."""
-    try:
-        return DocumentosCuentaCobro.objects.create(
-            documento_entrega=entrega, tipo_documento=tipo_documento, documento=archivo
+def adjuntar_documento(entrega, tipo_documento, archivo=None, clave=None):
+    """Adjunta un documento de un tipo a la entrega (estado inicial: Pendiente).
+
+    Solo sobre la última versión y mientras no se haya entregado: el paquete
+    enviado a revisión no se toca. `puede_cargar_documentos` ya lo esconde en la
+    interfaz, pero la guarda tiene que estar aquí, que es donde se modifica la
+    entrega.
+
+    Se recibe ``archivo`` (subida clásica, que viaja por el servidor) o ``clave``
+    (el archivo ya está en el bucket porque el navegador lo subió directo). En el
+    segundo caso solo se guarda la ruta: no se vuelve a transferir nada.
+    """
+    cuenta = entrega.cuenta_entrega
+    ultima = ultima_entrega(cuenta)
+    if ultima is not None and entrega.pk != ultima.pk:
+        raise ValidationError(
+            "Solo se pueden cargar documentos en la última versión de la entrega."
         )
+    if entrega_enviada(cuenta):
+        raise ValidationError(
+            "Ya entregaste esta versión: el paquete no se puede modificar. Si te "
+            "devuelven la cuenta, podrás cargar los documentos de nuevo."
+        )
+    documento = DocumentosCuentaCobro(
+        documento_entrega=entrega, tipo_documento=tipo_documento
+    )
+    _asignar_archivo(documento.documento, archivo, clave)
+    try:
+        documento.save()
     except IntegrityError:
         raise ValidationError(
             "Ya cargaste un documento de ese tipo en esta versión."
         )
+    return documento
+
+
+@transaction.atomic
+def eliminar_documento(documento, usuario):
+    """Quita un documento de la entrega, y su archivo del bucket.
+
+    Solo mientras el paquete siga abierto: una vez entregado está en manos de
+    quien revisa, y quitarle un documento por debajo cambiaría lo que esa persona
+    ya vio. Queda registrado en la bitácora, porque en un expediente oficial
+    importa saber que algo se retiró.
+    """
+    cuenta = documento.documento_entrega.cuenta_entrega
+    if entrega_enviada(cuenta):
+        raise ValidationError(
+            "Ya entregaste esta versión: no se pueden quitar documentos. Si te "
+            "devuelven la cuenta, podrás rehacer el paquete."
+        )
+    if cuenta.estado_supervisor is not None:
+        raise ValidationError("Esta cuenta ya tiene decisión del supervisor.")
+    nombre = documento.tipo_documento.nombre
+    archivo = documento.documento
+    documento.delete()
+    registrar_evento(
+        cuenta, usuario, EventoTrazabilidad.Etapa.RADICACION,
+        Eventos.DOC_ELIMINADO, nombre,
+    )
+    # Tras confirmar: si el borrado del archivo falla, lo peor que queda es un
+    # objeto huérfano en el bucket, no una fila apuntando a un archivo que ya no
+    # está.
+    transaction.on_commit(lambda: archivo.delete(save=False))
+    return nombre
+
+
+# `eliminar_documento_cierre` se retiró: ver la nota en selectors.py. Retirar
+# un documento de cierre deshabilitaba el trámite final que su propia carga
+# había habilitado, y la unicidad por (cuenta, tipo) impedía recargarlo.
+# El evento Eventos.CIERRE_ELIMINADO se conserva: hay cuentas con ese registro
+# en la bitácora y la bitácora no se reescribe.
 
 
 def tipos_obligatorios(cuenta):
-    """Tipos de documento obligatorios para la vigencia de la cuenta."""
-    return [
-        r.tipo_documento
-        for r in RequisitoDocumental.objects.filter(
-            vigencia=cuenta.vigencia, obligatorio=True
-        ).select_related("tipo_documento")
-    ]
+    """Tipos de documento obligatorios para la vigencia de la cuenta.
+
+    El resultado se guarda en la instancia de la vigencia porque se pide varias
+    veces por cuenta (completitud de la entrega y del cierre) y es
+    parametrización: ningún servicio toca los requisitos, así que no puede
+    quedar desactualizado dentro de una petición. Para compartirlo entre las
+    filas de un listado, ver ``precargar_tipos_obligatorios``.
+    """
+    vigencia = cuenta.vigencia
+    cacheados = getattr(vigencia, "_tipos_obligatorios", None)
+    if cacheados is None:
+        cacheados = [
+            r.tipo_documento
+            for r in RequisitoDocumental.objects.filter(
+                vigencia=vigencia, obligatorio=True
+            ).select_related("tipo_documento")
+        ]
+        vigencia._tipos_obligatorios = cacheados
+    return cacheados
+
+
+def precargar_tipos_obligatorios(cuentas):
+    """Resuelve los tipos obligatorios de varias cuentas en una sola consulta.
+
+    Cada fila de un listado trae su propia instancia de la vigencia, así que sin
+    esto cada una pagaría su consulta. Agrupa por vigencia y siembra la caché que
+    lee ``tipos_obligatorios``.
+    """
+    cuentas = list(cuentas)
+    ids = {c.vigencia_id for c in cuentas}
+    if not ids:
+        return cuentas
+    por_vigencia = {}
+    for r in RequisitoDocumental.objects.filter(
+        vigencia_id__in=ids, obligatorio=True
+    ).select_related("tipo_documento"):
+        por_vigencia.setdefault(r.vigencia_id, []).append(r.tipo_documento)
+    for cuenta in cuentas:
+        cuenta.vigencia._tipos_obligatorios = por_vigencia.get(cuenta.vigencia_id, [])
+    return cuentas
 
 
 def documentos_faltantes(cuenta):
@@ -235,6 +415,16 @@ def revisar_documento(documento, estado, comentario="", actor=None):
     """
     if estado not in DocumentosCuentaCobro.EstadoDocumento.values:
         raise ValidationError("Estado de documento inválido.")
+    # Rechazar sin causal deja al contratista sin saber qué corregir, y la
+    # devolución de la cuenta se apoya precisamente en estos rechazos.
+    if (
+        estado == DocumentosCuentaCobro.EstadoDocumento.RECHAZADO
+        and not (comentario or "").strip()
+    ):
+        raise ValidationError(
+            "Al rechazar un documento debes escribir la causal: es lo que el "
+            "contratista necesita para corregirlo."
+        )
     documento.estado = estado
     documento.comentario = comentario or ""
     documento.save(update_fields=["estado", "comentario"])
@@ -274,9 +464,10 @@ def entrega_enviada(cuenta):
     entrega = ultima_entrega(cuenta)
     if entrega is None:
         return False
-    return cuenta.eventos.filter(
-        evento=Eventos.ENVIADO, fecha_creacion__gte=entrega.fecha_creacion
-    ).exists()
+    return any(
+        e.evento == Eventos.ENVIADO and e.fecha_creacion >= entrega.fecha_creacion
+        for e in cuenta.eventos.all()
+    )
 
 
 def radicacion_rechazada(cuenta):
@@ -287,7 +478,11 @@ def radicacion_rechazada(cuenta):
     porque la radicación no tiene un campo de estado propio en la cuenta."""
     if cuenta.fecha_radicacion is not None:
         return False
-    ultima = cuenta.revisionpararadicacion_set.order_by("fecha_creacion").last()
+    ultima = max(
+        cuenta.revisionpararadicacion_set.all(),
+        key=lambda r: (r.fecha_creacion, r.pk),
+        default=None,
+    )
     return (
         ultima is not None
         and ultima.resultado == RevisionParaRadicacion.ResultadoRevision.RECHAZADA
@@ -588,12 +783,12 @@ def decidir_supervisor(cuenta, supervisor, resultado, comentario):
 def documentos_cierre_faltantes(cuenta):
     """Tipos obligatorios de la vigencia que aún no se cargaron como documento de
     cierre firmado. Mismos tipos obligatorios que validan la entrega inicial."""
-    cargados = set(cuenta.documentocierre_set.values_list("tipo_documento_id", flat=True))
+    cargados = {d.tipo_documento_id for d in cuenta.documentocierre_set.all()}
     return [t for t in tipos_obligatorios(cuenta) if t.id not in cargados]
 
 
 @transaction.atomic
-def cargar_documento_cierre(cuenta, tipo_documento, archivo, usuario):
+def cargar_documento_cierre(cuenta, tipo_documento, archivo=None, usuario=None, clave=None):
     """Carga un documento de cierre FIRMADO (mismo tipo del catálogo que la entrega
     inicial). Lo hace el rol de radicación tras la aprobación del supervisor.
 
@@ -601,11 +796,11 @@ def cargar_documento_cierre(cuenta, tipo_documento, archivo, usuario):
     """
     if not es_radicacion(usuario):
         raise ValidationError("Solo el rol de radicación puede cargar el cierre.")
+    doc = DocumentoCierre(
+        cuenta_entrega=cuenta, tipo_documento=tipo_documento, usuario=usuario
+    )
+    _asignar_archivo(doc.documento, archivo, clave)
     try:
-        doc = DocumentoCierre(
-            cuenta_entrega=cuenta, tipo_documento=tipo_documento,
-            documento=archivo, usuario=usuario,
-        )
         doc.save()  # full_clean valida cuenta aprobada
     except IntegrityError:
         raise ValidationError("Ya se cargó ese documento de cierre.")
@@ -621,7 +816,7 @@ def cargar_documento_cierre(cuenta, tipo_documento, archivo, usuario):
 # 6. Trámites finales (SF → SC, secuenciales por rol)
 # --------------------------------------------------------------------------- #
 def tramite_de(cuenta, tipo):
-    return cuenta.tramites_finales.filter(tipo=tipo).first()
+    return next((t for t in cuenta.tramites_finales.all() if t.tipo == tipo), None)
 
 
 def tramite_realizado(cuenta, tipo):
@@ -647,9 +842,12 @@ def tramite_habilitado(cuenta, tipo):
 
 
 @transaction.atomic
-def responder_tramite(cuenta, tipo, usuario, realizado, evidencia, comentario):
+def responder_tramite(cuenta, tipo, usuario, realizado, evidencia, comentario, clave=None):
     """Registra la respuesta a un trámite final. Al marcar realizado exige
-    evidencia (lo impone el modelo). Cierra el trámite si los dos están listos."""
+    evidencia (lo impone el modelo). Cierra el trámite si los dos están listos.
+
+    La evidencia llega como ``evidencia`` (subida clásica) o como ``clave`` (ya
+    está en el bucket porque el navegador la subió directo)."""
     cuenta = _lock(cuenta)
     if tipo not in TramiteFinal.Tipo.values:
         raise ValidationError("Tipo de trámite inválido.")
@@ -662,8 +860,8 @@ def responder_tramite(cuenta, tipo, usuario, realizado, evidencia, comentario):
     tramite.usuario = usuario
     tramite.realizado = realizado
     tramite.comentario = comentario or ""
-    if evidencia is not None:
-        tramite.evidencia = evidencia
+    if clave or evidencia is not None:
+        _asignar_archivo(tramite.evidencia, evidencia, clave)
     tramite.save()  # full_clean: evidencia exige realizado y viceversa
 
     if realizado:
@@ -679,6 +877,14 @@ def responder_tramite(cuenta, tipo, usuario, realizado, evidencia, comentario):
 # --------------------------------------------------------------------------- #
 # 7. Cierre del trámite
 # --------------------------------------------------------------------------- #
+# `reemplazar_evidencia` se retiró: ver la nota en selectors.py. El cargue de un
+# trámite pide confirmación antes de registrar nada, que es donde se evita el
+# archivo equivocado; un soporte que se pueda cambiar después debilita el valor
+# probatorio del expediente. El evento Eventos.EVIDENCIA_REEMPLAZADA se conserva:
+# puede haber cuentas con ese registro en la bitácora, y la bitácora no se
+# reescribe.
+
+
 def _cerrar(cuenta, usuario):
     """Cierra la cuenta (ya bloqueada y validada). Idempotente."""
     cuenta.cerrar()
@@ -704,7 +910,7 @@ def cerrar_tramite(cuenta, usuario):
 
 
 # --------------------------------------------------------------------------- #
-# 8. Notificaciones derivadas (§9) — sin modelo, calculadas en vivo
+# 8. Notificaciones derivadas (§9): sin modelo, calculadas en vivo
 # --------------------------------------------------------------------------- #
 # Tipos de notificación (alimentan el color en la plantilla).
 NOTIF_ASIGNACION = "asignacion"
@@ -713,13 +919,26 @@ NOTIF_DEVOLUCION = "devolucion"
 NOTIF_APROBACION = "aprobacion"
 
 
+def nombre_de_cuenta(cuenta):
+    """Nombre legible de una cuenta: "2026 · Junio".
+
+    ``CuentaEntrega.__str__`` devuelve el mes como número ("2026: 6") y así
+    aparecía en las migas de pan. El modelo es definitivo y no se toca, de modo
+    que el formato vive aquí, en un solo sitio, y lo usan las notificaciones, las
+    migas y el filtro de plantilla ``cc_nombre``.
+    """
+    if cuenta is None:
+        return ""
+    return f"{cuenta.vigencia.vigencia} · {cuenta.get_mes_display()}"
+
+
 def _notif(tipo, texto, cuenta):
     return {
         "tipo": tipo,
         "texto": texto,
         "cuenta_id": cuenta.pk,
         "url": reverse("cuentas_cobro:cuenta_detalle", args=[cuenta.pk]),
-        "cuenta": f"{cuenta.vigencia.vigencia} · {cuenta.get_mes_display()}",
+        "cuenta": nombre_de_cuenta(cuenta),
     }
 
 
@@ -737,7 +956,13 @@ def notificaciones_para(user):
         return []
     items = []
     AP = CuentaEntrega.ResultadoRevision.APROBADA
-    base = CuentaEntrega.objects.select_related("vigencia").filter(fecha_cierre__isnull=True)
+    # Esto corre en CADA petición desde los context processors (alimenta la
+    # campana), así que la precarga importa más aquí que en cualquier otro sitio.
+    base = (
+        CuentaEntrega.objects.select_related("vigencia")
+        .prefetch_related(*RELACIONES_DEL_FLUJO)
+        .filter(fecha_cierre__isnull=True)
+    )
 
     # Contratista (sobre sus propias cuentas)
     if es_contratista(user):
@@ -745,7 +970,15 @@ def notificaciones_para(user):
             if c.estado_supervisor == CuentaEntrega.ResultadoRevision.RECHAZADA:
                 continue
             if c.estado_supervisor == AP:
-                continue  # tras la aprobación, el cierre lo carga radicación
+                # El cierre lo carga radicación, no el contratista; pero cuando
+                # termina de cargarlo hay que avisarle, porque hasta ahora se
+                # quedaba sin noticias justo en la etapa final. Mientras falte
+                # algún documento no se dice nada: ese trabajo no es suyo.
+                if not documentos_cierre_faltantes(c):
+                    items.append(_notif(
+                        NOTIF_APROBACION,
+                        "Ya se cargaron los documentos de cierre firmados", c))
+                continue
             if not entrega_enviada(c):
                 entrega = ultima_entrega(c)
                 if entrega is not None and entrega.numero_version > 1:
@@ -812,7 +1045,7 @@ def notificaciones_para(user):
 
 
 # --------------------------------------------------------------------------- #
-# 9. Etapa actual / flujo de la cuenta (§10) — derivado del estado
+# 9. Etapa actual / flujo de la cuenta (§10): derivado del estado
 # --------------------------------------------------------------------------- #
 HECHA, ACTUAL, FUTURA, RECHAZADA = "hecha", "actual", "futura", "rechazada"
 
@@ -831,15 +1064,18 @@ def flujo_de_cuenta(cuenta):
     radicada = cuenta.fecha_radicacion is not None
     activas = {
         a.rol: a
-        for a in cuenta.asignacionrevisor_set.filter(
-            estado=AsignacionRevisor.Estado.ACTIVA)
+        for a in cuenta.asignacionrevisor_set.all()
+        if a.estado == AsignacionRevisor.Estado.ACTIVA
     }
     aprobados = _roles_aprobados(entrega) if entrega else set()
 
     etapas = []
 
     # 1. Cargue y entrega
-    if enviada or radicada:
+    # Manda el estado de la VERSIÓN VIGENTE, no el historial de la cuenta: tras
+    # una devolución la cuenta sigue radicada pero la versión nueva está vacía y
+    # sin entregar, así que el cargue vuelve a estar en curso.
+    if enviada:
         e1 = HECHA
         det1 = f"Versión {version} entregada"
     elif version > 1:
@@ -870,9 +1106,11 @@ def flujo_de_cuenta(cuenta):
         etapas.append(_etapa("asignacion", "Asignación de revisores", FUTURA))
 
     # 4. Revisión secuencial
+    # Exige `enviada` por lo mismo que la etapa 1: tras una devolución no hay nada
+    # entregado que revisar, y la etapa vuelve a esperar su turno.
     if cuenta.estado_revisores == AP:
         det4, e4 = "Los tres roles aprobaron", HECHA
-    elif radicada and todos_asignados:
+    elif radicada and todos_asignados and enviada:
         en_turno = next((r for r in SECUENCIA_ROLES if rol_habilitado(entrega, r)), None)
         if en_turno is not None:
             det4 = f"En revisión {_ROL_NOMBRE[en_turno]}"
@@ -932,8 +1170,14 @@ def _responsable_paso(cuenta, clave):
     if clave == "asignacion":
         return "Supervisor"
     if clave == "revision":
+        # El turno se deduce de quién no ha aprobado la versión vigente, sin exigir
+        # que esté entregada: así, cuando la revisión es el paso SIGUIENTE (tras una
+        # devolución, mientras el contratista corrige), se nombra al revisor que la
+        # recibirá (el técnico, porque el ciclo reinicia desde él) en vez del
+        # genérico "Revisores".
         entrega = ultima_entrega(cuenta)
-        en_turno = next((r for r in SECUENCIA_ROLES if rol_habilitado(entrega, r)), None)
+        aprobados = _roles_aprobados(entrega) if entrega else set()
+        en_turno = next((r for r in SECUENCIA_ROLES if r not in aprobados), None)
         return f"Revisor {_ROL_NOMBRE[en_turno]}" if en_turno else "Revisores"
     if clave == "supervisor":
         return "Supervisor"
@@ -944,15 +1188,17 @@ def _responsable_paso(cuenta, clave):
         return {
             TramiteFinal.Tipo.CARGUE_SIIFWEB: "Revisor administrativo",
             TramiteFinal.Tipo.CARGUE_SECOP: "Rol de secop",
-        }.get(nxt, "—")
+        }.get(nxt, "-")
     if clave == "cierre":
         return "Sistema (automático)"
-    return "—"
+    return "-"
 
 
 def _inicio_paso(cuenta):
     """Fecha en que la cuenta entró al paso actual (último evento registrado)."""
-    ultimo = cuenta.eventos.order_by("fecha_creacion").last()
+    ultimo = max(
+        cuenta.eventos.all(), key=lambda e: (e.fecha_creacion, e.pk), default=None
+    )
     return ultimo.fecha_creacion if ultimo else cuenta.fecha_creacion
 
 
@@ -965,37 +1211,42 @@ def paso_actual(cuenta):
     if cuenta.fecha_cierre is not None:
         return {
             "cerrada": True, "rechazada": False, "titulo": "Cerrada",
-            "detalle": "", "responsable": "—", "desde": cuenta.fecha_cierre,
-            "siguiente": "—", "siguiente_responsable": "—",
+            "detalle": "", "responsable": "-", "desde": cuenta.fecha_cierre,
+            "siguiente": "-", "siguiente_responsable": "-",
         }
     if cuenta.estado_supervisor == RE:
         return {
             "cerrada": False, "rechazada": True, "titulo": "Rechazada por el supervisor",
-            "detalle": "", "responsable": "—", "desde": _inicio_paso(cuenta),
-            "siguiente": "—", "siguiente_responsable": "—",
+            "detalle": "", "responsable": "-", "desde": _inicio_paso(cuenta),
+            "siguiente": "-", "siguiente_responsable": "-",
         }
     if radicacion_rechazada(cuenta):
         return {
             "cerrada": False, "rechazada": True, "titulo": "Rechazada en radicación",
-            "detalle": "", "responsable": "—", "desde": _inicio_paso(cuenta),
-            "siguiente": "—", "siguiente_responsable": "—",
+            "detalle": "", "responsable": "-", "desde": _inicio_paso(cuenta),
+            "siguiente": "-", "siguiente_responsable": "-",
         }
     flujo = flujo_de_cuenta(cuenta)
     idx = next((i for i, e in enumerate(flujo) if e["estado"] == ACTUAL), None)
     if idx is None:
         return {
             "cerrada": False, "rechazada": False, "titulo": "En proceso",
-            "detalle": "", "responsable": "—", "desde": _inicio_paso(cuenta),
-            "siguiente": "—", "siguiente_responsable": "—",
+            "detalle": "", "responsable": "-", "desde": _inicio_paso(cuenta),
+            "siguiente": "-", "siguiente_responsable": "-",
         }
     actual = flujo[idx]
-    if idx + 1 < len(flujo):
-        sig = flujo[idx + 1]
+    # El siguiente paso es la próxima etapa QUE FALTE, no la siguiente de la lista:
+    # tras una devolución de revisor la cuenta ya está radicada y con revisores
+    # asignados, así que al reentregar va directa a la revisión; anunciar
+    # "Radicación" porque es la etapa de al lado sería mandar a la gente a un paso
+    # que ya ocurrió.
+    sig = next((e for e in flujo[idx + 1:] if e["estado"] != HECHA), None)
+    if sig is not None:
         siguiente = sig["titulo"]
         siguiente_responsable = _responsable_paso(cuenta, sig["clave"])
     else:
         siguiente = "Finaliza el trámite"
-        siguiente_responsable = "—"
+        siguiente_responsable = "-"
     return {
         "cerrada": False, "rechazada": False,
         "titulo": actual["titulo"], "detalle": actual["detalle"],

@@ -1,0 +1,25 @@
+# Fin de línea: LF en el repositorio.
+#
+# No corrige nada: el repo ya guarda LF de forma consistente en sus archivos de
+# texto. Lo deja escrito para que no dependa de la configuración de cada máquina.
+#
+# Por qué importa: en Windows, `core.autocrlf=true` (el valor por omisión de Git
+# for Windows) convierte a CRLF al sacar los archivos y vuelve a LF al guardar.
+# Funciona, pero es invisible y confunde: comparar la carpeta de trabajo de un
+# clon en Windows contra archivos con LF hace creer que todo cambió, cuando lo
+# guardado es idéntico. Con esta regla, el contenido del repositorio es LF
+# independientemente de cómo esté configurada la máquina de quien edite.
+#
+# `text=auto` deja que git detecte qué es binario: los PDF, PNG y demás no se
+# tocan.
+* text=auto eol=lf
+
+# Binarios declarados explícitamente, para que ninguna heurística los altere.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.xlsx binary
+*.sqlite3 binary

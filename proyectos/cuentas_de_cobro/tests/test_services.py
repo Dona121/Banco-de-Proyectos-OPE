@@ -65,6 +65,9 @@ class FlujoBaseTest(TestCase):
         services.adjuntar_documento(entrega, self.t2, _archivo())
         return cuenta
 
+    def _archivo_de_prueba(self, nombre="doc.pdf"):
+        return _archivo(nombre)
+
     def _entregar(self, cuenta):
         services.entregar(cuenta, self.contratista)
 
@@ -595,6 +598,47 @@ class NotificacionesCuentasTest(FlujoBaseTest):
         cuenta = self._radicar(self._cuenta_con_documentos())
         self._aprobar_revisores(cuenta)
         self.assertTrue(any("decisión final" in t for t in self._textos(self.supervisor)))
+
+    def _hasta_aprobacion_del_supervisor(self):
+        cuenta = self._radicar(self._cuenta_con_documentos())
+        self._aprobar_revisores(cuenta)
+        cuenta.refresh_from_db()
+        services.decidir_supervisor(cuenta, self.supervisor, ResRad.APROBADA, "ok")
+        cuenta.refresh_from_db()
+        return cuenta
+
+    def test_contratista_avisado_cuando_el_cierre_esta_completo(self):
+        """Antes se quedaba sin noticias en cuanto el supervisor aprobaba."""
+        cuenta = self._hasta_aprobacion_del_supervisor()
+        # Mientras radicación no termine, al contratista no se le dice nada: el
+        # cargue del cierre no es trabajo suyo.
+        self.assertFalse(
+            any("cierre" in t for t in self._textos(self.contratista)),
+            self._textos(self.contratista),
+        )
+        for tipo in services.tipos_obligatorios(cuenta):
+            services.cargar_documento_cierre(cuenta, tipo, _archivo(), self.radicador)
+        self.assertEqual(services.documentos_cierre_faltantes(cuenta), [])
+
+        textos = self._textos(self.contratista)
+        self.assertTrue(
+            any("documentos de cierre firmados" in t for t in textos), textos
+        )
+
+    def test_el_aviso_de_cierre_desaparece_al_cerrarse_la_cuenta(self):
+        cuenta = self._hasta_aprobacion_del_supervisor()
+        for tipo in services.tipos_obligatorios(cuenta):
+            services.cargar_documento_cierre(cuenta, tipo, _archivo(), self.radicador)
+        services.responder_tramite(
+            cuenta, Tipo.CARGUE_SIIFWEB, self.rev_ad, True, _archivo(), "ok"
+        )
+        cuenta.refresh_from_db()
+        services.responder_tramite(
+            cuenta, Tipo.CARGUE_SECOP, self.secop, True, _archivo(), "ok"
+        )
+        cuenta.refresh_from_db()
+        self.assertIsNotNone(cuenta.fecha_cierre)
+        self.assertFalse(any("cierre firmados" in t for t in self._textos(self.contratista)))
 
 
 class CuentasVisiblesScopeTest(FlujoBaseTest):

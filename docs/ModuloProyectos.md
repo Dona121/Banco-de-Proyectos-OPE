@@ -155,7 +155,13 @@ Formulador:
 
 ### Proyectos
 
-* Listado.
+* Listado, con buscador y **filtros de director, coordinador y formulador**. Las
+  opciones de cada desplegable se derivan de los proyectos que ese usuario puede
+  ver, de modo que el filtro sale dinámico según el rol y la asignación sin escribir
+  una regla por rol, y ninguna opción puede devolver una lista vacía. Los filtros se
+  conservan al paginar.
+* **Flujograma del proceso** (modal), el mismo recorrido completo que se ve desde
+  actividades: proyecto → actividad → subactividad → entrega → revisión.
 * Creación.
 * Edición.
 * Detalle.
@@ -171,7 +177,11 @@ Formulador:
 
 * Crear entrega.
 * Ver historial de versiones.
-* Ver documentos asociados.
+* Ver documentos asociados, con **abrir, descargar y quitar**. Los archivos suben
+  directo al bucket mostrando el porcentaje, con opción de **cancelar** mientras
+  viajan. Quitar un documento está permitido para quien hizo la entrega **mientras
+  la actividad no esté aprobada**: una actividad aprobada cierra el expediente y sus
+  soportes ya no se tocan.
 
 ### Revisiones
 

@@ -4,30 +4,78 @@
 {% block title %}Proyectos · Gestión de Proyectos{% endblock %}
 
 {% block app_content %}
+{% comment %}El modal del flujograma se abre con la variable `flujograma`, igual que en la lista de actividades, y reutiliza el mismo partial: el proceso que describe es el de proyecto → actividad → subactividad.{% endcomment %}
+<div x-data="{ flujograma:false }">
 <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
   <div>
     <h1 class="font-head text-2xl font-bold text-slate-800">Proyectos</h1>
     <p class="text-sm text-slate-500">{{ paginator.count }} proyecto{{ paginator.count|pluralize }} a tu cargo.</p>
   </div>
+  <div class="flex items-center gap-2">
+  <button type="button" @click="flujograma=true" class="btn btn-outline">Flujograma del proceso</button>
   {% if es_director %}
   <a href="{% url 'web:proyecto_nuevo' %}" class="btn btn-primary">
     <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
     Nuevo proyecto
   </a>
   {% endif %}
+  </div>
 </div>
 
-<form method="get" class="mb-5">
-  <div class="relative max-w-sm">
-    <svg class="pointer-events-none absolute left-3 top-2.5 h-5 w-5 text-slate-400" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
-    <input name="q" value="{{ q }}" placeholder="Buscar proyecto…"
-           class="w-full rounded-lg border border-slate-300 bg-white py-2 pl-10 pr-3 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 focus:outline-none">
+{% comment %}Un desplegable se pinta si tiene a alguien a quien filtrar. Antes se exigían dos o más opciones, y con pocos usuarios no aparecía ninguno.{% endcomment %}
+<form method="get" class="card mb-4 flex flex-wrap items-end gap-3 p-4">
+  {% comment %}Sin el icono de lupa: posicionarlo bajo la etiqueta pedía una clase que no está en el CSS compilado, y el CSS se compila a mano.{% endcomment %}
+  <div class="min-w-48 flex-1">
+    <label class="mb-1 block text-xs font-semibold text-slate-500">Buscar</label>
+    <input name="q" value="{{ q }}" placeholder="Nombre del proyecto…"
+           class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 focus:outline-none">
+  </div>
+
+  {% if directores %}
+  <div class="min-w-44">
+    <label class="mb-1 block text-xs font-semibold text-slate-500">Director</label>
+    <select name="director" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 focus:outline-none">
+      <option value="">Todos</option>
+      {% for u in directores %}
+      <option value="{{ u.pk }}" {% if filtros.director == u.pk|stringformat:'s' %}selected{% endif %}>{{ u.get_full_name|default:u.username }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% endif %}
+
+  {% if coordinadores %}
+  <div class="min-w-44">
+    <label class="mb-1 block text-xs font-semibold text-slate-500">Coordinador</label>
+    <select name="coordinador" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 focus:outline-none">
+      <option value="">Todos</option>
+      {% for u in coordinadores %}
+      <option value="{{ u.pk }}" {% if filtros.coordinador == u.pk|stringformat:'s' %}selected{% endif %}>{{ u.get_full_name|default:u.username }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% endif %}
+
+  {% if formuladores %}
+  <div class="min-w-44">
+    <label class="mb-1 block text-xs font-semibold text-slate-500">Formulador</label>
+    <select name="formulador" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 focus:outline-none">
+      <option value="">Todos</option>
+      {% for u in formuladores %}
+      <option value="{{ u.pk }}" {% if filtros.formulador == u.pk|stringformat:'s' %}selected{% endif %}>{{ u.get_full_name|default:u.username }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% endif %}
+
+  <div class="flex gap-2">
+    <button class="btn btn-soft">Filtrar</button>
+    <a href="{% url 'web:proyectos' %}" class="btn btn-outline">Limpiar</a>
   </div>
 </form>
 
 <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
   {% for proyecto in proyectos %}
-  <a href="{% url 'web:proyecto_detalle' proyecto.pk %}" class="card card-hover p-5 group">
+  <a href="{% url 'web:proyecto_detalle' proyecto.pk %}" class="card p-5 group">
     <div class="flex items-start justify-between">
       <span class="grid h-10 w-10 place-items-center rounded-lg bg-brand-light text-brand">
         <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"/></svg>
@@ -52,4 +100,7 @@
 </div>
 
 {% include 'components/paginacion.html' %}
+
+{% include 'web/actividades/_flujograma.html' %}
+</div>
 {% endblock %}

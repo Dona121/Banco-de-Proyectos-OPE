@@ -5,7 +5,6 @@ from django.urls import reverse
 
 from cuentas_de_cobro import services
 from cuentas_de_cobro.models import (
-    CuentaEntrega,
     RequisitoDocumental,
     TipoDocumentoCargue,
     Vigencia,
@@ -46,6 +45,22 @@ class VistasTest(TestCase):
         for u in (self.contratista, self.supervisor):
             self.client.force_login(u)
             self.assertEqual(self.client.get(url).status_code, 200)
+
+    def test_filtro_de_contratista_no_numerico_no_revienta(self):
+        """El id sale de la querystring: si no es un número, filtrar por él hacía
+        que el ORM lanzara ValueError y la bandeja respondiera 500."""
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(reverse("cuentas_cobro:bandeja") + "?contratista=abc")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_filtro_de_contratista_valido_si_filtra(self):
+        otro = User.objects.create_user("otro_contratista", password="x")
+        otro.groups.add(Group.objects.get(name="Contratista"))
+        self.client.force_login(self.contratista)
+        url = reverse("cuentas_cobro:bandeja")
+        self.assertIn(self.cuenta, self.client.get(url).context["cuentas"])
+        resp = self.client.get(f"{url}?contratista={otro.pk}")
+        self.assertNotIn(self.cuenta, resp.context["cuentas"])
 
     def test_usuario_sin_rol_no_entra(self):
         self.client.force_login(self.ajeno)
@@ -95,6 +110,22 @@ class VistasTest(TestCase):
         entrega = services.ultima_entrega(self.cuenta)
         self.assertEqual(entrega.documentoscuentacobro_set.count(), 1)
 
+    def test_tras_entregar_el_contratista_ve_el_aviso_y_no_el_formulario(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        services.adjuntar_documento(
+            services.ultima_entrega(self.cuenta), self.tipo,
+            SimpleUploadedFile("d.pdf", b"x", content_type="application/pdf"))
+        services.entregar(self.cuenta, self.contratista)
+        self.client.force_login(self.contratista)
+        cuerpo = self.client.get(
+            reverse("cuentas_cobro:cuenta_detalle", args=[self.cuenta.pk])
+        ).content.decode()
+        # Ya no se pinta el componente de subida (la URL que firma el permiso).
+        firmar = reverse("cuentas_cobro:subida_firmar", args=[self.cuenta.pk, "entrega"])
+        self.assertNotIn(firmar, cuerpo)
+        self.assertIn("A la espera de la revisión de radicación", cuerpo)
+
     def test_form_de_carga_se_oculta_si_no_faltan_documentos(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
 
@@ -109,6 +140,6 @@ class VistasTest(TestCase):
             reverse("cuentas_cobro:cuenta_detalle", args=[self.cuenta.pk])
         )
         cuerpo = resp.content.decode()
-        accion = reverse("cuentas_cobro:documento_cargar", args=[self.cuenta.pk])
-        self.assertNotIn(accion, cuerpo)
+        firmar = reverse("cuentas_cobro:subida_firmar", args=[self.cuenta.pk, "entrega"])
+        self.assertNotIn(firmar, cuerpo)
         self.assertIn("Cargaste todos los documentos obligatorios", cuerpo)

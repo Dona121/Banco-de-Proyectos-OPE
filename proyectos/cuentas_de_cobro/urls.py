@@ -9,6 +9,18 @@ urlpatterns = [
     path("nueva/", views.CuentaCreateView.as_view(), name="cuenta_nueva"),
     path("<int:pk>/", views.CuentaDetailView.as_view(), name="cuenta_detalle"),
 
+    # Subida directa al bucket: el archivo no pasa por el servidor, que solo
+    # firma el permiso y registra el resultado (ver cuentas/subidas.py).
+    path("<int:pk>/subir/<str:destino>/firmar/",
+         views.SubidaFirmarView.as_view(), name="subida_firmar"),
+    path("<int:pk>/subir/<str:destino>/confirmar/",
+         views.SubidaConfirmarView.as_view(), name="subida_confirmar"),
+    # Descarga con nombre legible, comprobando antes que la cuenta sea visible.
+    path("<int:pk>/descargar/<str:tipo>/<int:doc_pk>/",
+         views.DescargaView.as_view(), name="descargar"),
+    path("<int:pk>/eliminar/<str:tipo>/<int:doc_pk>/",
+         views.EliminarArchivoView.as_view(), name="eliminar_archivo"),
+
     # Contratista
     path("<int:pk>/documentos/cargar/",
          views.DocumentoCargarView.as_view(), name="documento_cargar"),
@@ -20,7 +32,7 @@ urlpatterns = [
     path("documentos/<int:doc_pk>/revisar/",
          views.DocumentoRevisarView.as_view(), name="documento_revisar"),
 
-    # Supervisor — asignación
+    # Supervisor: asignación
     path("<int:pk>/asignar/", views.AsignarRevisorView.as_view(), name="asignar"),
     path("asignaciones/<int:asignacion_pk>/reasignar/",
          views.ReasignarView.as_view(), name="reasignar"),
@@ -31,7 +43,7 @@ urlpatterns = [
     path("asignaciones/<int:asignacion_pk>/revisar/",
          views.RevisionView.as_view(), name="revisar"),
 
-    # Supervisor — decisión final · Contratista — cierre · Trámites finales
+    # Supervisor (decisión final · Contratista) cierre · Trámites finales
     path("<int:pk>/decision/",
          views.DecisionSupervisorView.as_view(), name="decision"),
     path("<int:pk>/cierre/cargar/",

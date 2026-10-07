@@ -11,6 +11,7 @@ from contenido.models import (
     Subactividades,
 )
 from cuentas.roles import COORDINADOR, FORMULADOR, es_director
+from cuentas.validadores import ArchivoValidadoMixin
 
 User = get_user_model()
 
@@ -132,7 +133,7 @@ class EntregaForm(EstilizadoMixin, forms.Form):
     )
 
 
-class DocumentoForm(EstilizadoMixin, forms.ModelForm):
+class DocumentoForm(ArchivoValidadoMixin, EstilizadoMixin, forms.ModelForm):
     class Meta:
         model = Documentos
         fields = ("nombre", "archivo")

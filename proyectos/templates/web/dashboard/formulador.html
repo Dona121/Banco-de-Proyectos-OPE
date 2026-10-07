@@ -112,7 +112,7 @@
             <td class="text-slate-500">{{ a.proyecto.nombre }}</td>
             <td>{% estado_badge a.estado %}</td>
             <td>
-              {% if a.estado == 'AP' %}<span class="text-slate-400">—</span>
+              {% if a.estado == 'AP' %}<span class="text-slate-400">-</span>
               {% elif dr < 0 %}<span class="text-rojo font-semibold">Vencida</span>
               {% else %}<span class="text-slate-600">{{ dr }} día{{ dr|pluralize }}</span>{% endif %}
             </td>

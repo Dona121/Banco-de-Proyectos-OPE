@@ -3,10 +3,13 @@
 Centralizan la regla "un usuario nunca ve información que no le corresponda".
 Las vistas SIEMPRE deben partir de estas funciones, nunca de ``Model.objects``.
 """
+from django.contrib.auth import get_user_model
 from django.db.models import Count, Q
 
 from contenido.models import Actividades, ActividadEntrega, Proyectos, Revisiones
 from cuentas.roles import roles_de, CONSULTA, DIRECTOR, COORDINADOR, FORMULADOR
+
+User = get_user_model()
 
 
 # --------------------------------------------------------------------------- #
@@ -28,6 +31,42 @@ def proyectos_visibles(user):
     if FORMULADOR in grupos:
         return qs.filter(actividades__asignado_a=user).distinct()
     return qs.none()
+
+
+def opciones_de_filtro(user):
+    """Personas que de verdad aparecen en los proyectos visibles de ``user``.
+
+    Una sola regla para los tres filtros en vez de una rama por rol: el alcance
+    ya lo aplica ``proyectos_visibles``, así que ninguna opción puede acabar
+    devolviendo una lista vacía. De ahí sale el comportamiento que se pedía (que
+    el filtro dependa del rol y de las asignaciones) sin escribirlo a mano:
+
+    * a un coordinador, "director" le ofrece solo los directores de los proyectos
+      que coordina;
+    * a un formulador, los directores y coordinadores de los proyectos donde
+      tiene actividades, y los demás formuladores que trabajan en ellos;
+    * a Consulta y al administrador, todos, porque ven todos los proyectos.
+
+    Un proyecto tiene un único coordinador (``asignado_a``), así que el filtro de
+    coordinador puede quedarse con una sola opción; cuando eso pasa no aporta
+    nada y la plantilla lo esconde.
+    """
+    ids = list(proyectos_visibles(user).values_list("pk", flat=True))
+
+    def personas(**filtro):
+        if not ids:
+            return User.objects.none()
+        return (
+            User.objects.filter(**filtro).distinct().order_by("first_name", "username")
+        )
+
+    return {
+        "directores": personas(proyectos_creados__in=ids),
+        "coordinadores": personas(proyectos_asignados__in=ids),
+        "formuladores": personas(
+            actividades_asignadas_a__proyecto__in=ids, groups__name=FORMULADOR
+        ),
+    }
 
 
 # --------------------------------------------------------------------------- #

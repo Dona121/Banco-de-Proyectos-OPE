@@ -67,7 +67,7 @@ def _proximas_y_vencidas(actividades, ahora):
 
 
 # --------------------------------------------------------------------------- #
-# Director — vista ejecutiva
+# Director: vista ejecutiva
 # --------------------------------------------------------------------------- #
 def director(user):
     ahora = timezone.now()
@@ -138,7 +138,7 @@ def director(user):
 
 
 # --------------------------------------------------------------------------- #
-# Coordinador — vista operativa
+# Coordinador: vista operativa
 # --------------------------------------------------------------------------- #
 def coordinador(user):
     ahora = timezone.now()
@@ -191,7 +191,7 @@ def coordinador(user):
 
 
 # --------------------------------------------------------------------------- #
-# Consulta — panel transversal de solo lectura (ambos dominios)
+# Consulta: panel transversal de solo lectura (ambos dominios)
 # --------------------------------------------------------------------------- #
 def consulta(user):
     """Totales globales de solo lectura. El rol Consulta ve todo pero no actúa;
@@ -226,7 +226,7 @@ def consulta(user):
 
 
 # --------------------------------------------------------------------------- #
-# Formulador — vista personal
+# Formulador: vista personal
 # --------------------------------------------------------------------------- #
 def formulador(user):
     ahora = timezone.now()

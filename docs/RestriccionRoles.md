@@ -1,5 +1,23 @@
 # Tarea puntual: aislación de acceso por rol entre apps
 
+> **COMPLETADA el 2026-10-06.** Se conserva como registro del encargo y del
+> criterio aplicado. Lo que faltaba al cerrarla: las vistas de `web` solo llevaban
+> `LoginRequiredMixin`, así que un **Contratista** recibía 200 en `/proyectos/`,
+> `/actividades/`, `/reportes/` y los dos reportes descargables. No había fuga de
+> datos (los selectores le devolvían vacío), pero contradecía esta regla. Se
+> resolvió con `ModuloProyectosRequeridoMixin` en las vistas de lectura del dominio
+> y `@rol_requerido` en las dos vistas función de reportes.
+>
+> **El panel de inicio quedó como excepción deliberada.** Es el destino del login de
+> todos los roles (`LOGIN_REDIRECT_URL = web:dashboard`), así que ponerle el mixin
+> habría dejado a todo el módulo de cuentas de cobro con un 403 al entrar. En su
+> lugar, a quien solo pertenece a ese módulo se le redirige a su bandeja; antes
+> aterrizaba en un "tu cuenta no tiene un rol asignado" que era falso.
+>
+> Verificado en `web.tests.AislamientoDeDominiosTest`. Ver también el rol
+> transversal **Consulta**, que es la otra excepción documentada (ve los dos
+> dominios, en solo lectura).
+
 El módulo de cuentas de cobro ya está implementado. Esta es la **única** tarea
 pendiente y debe ser quirúrgica: **no rehagas ni refactorices nada más**, no toques
 modelos, servicios ni el flujo. Solo control de acceso.
@@ -14,7 +32,7 @@ las vistas de su propia app.
 - Sin excepciones ni cruces: `SUPERVISOR` (módulo) y `DIRECTOR` (otra app) quedan
   separados. Ningún rol de una app accede a las vistas de la otra.
 
-## Cómo (reutiliza lo existente — no inventes infraestructura)
+## Cómo (reutiliza lo existente: no inventes infraestructura)
 Ya existe el sistema de permisos: `cuentas.mixins.RolRequeridoMixin` (login + bypass
 superusuario + `tiene_rol`), los mixins por rol del módulo
 (`ContratistaRequeridoMixin`, `SupervisorRequeridoMixin`, `RevisorRequeridoMixin`,
@@ -42,7 +60,7 @@ no debe quedar ninguna.
 2. **Corrección:** aplica a cada vista sin proteger el mixin correcto según la
    clasificación acción/consulta de arriba. Si una vista de acción admite varios
    roles legítimos (p. ej. la aprobación de radicación la hacen `SUPERVISOR` o
-   `RADICACION`), usa un mixin con esos roles del módulo —y solo del módulo—.
+   `RADICACION`), usa un mixin con esos roles del módulo (y solo del módulo).
 3. **Verificación:** confirma que las vistas de la otra app no sean accesibles por
    roles del módulo y viceversa (basta con que cada app gatee sus vistas con sus
    propios roles; no agregues roles cruzados a ningún mixin).

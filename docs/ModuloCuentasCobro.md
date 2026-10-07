@@ -32,12 +32,12 @@ ellos: servicios, vistas, formularios, URLs, plantillas, permisos, admin y tests
 Estos son los modelos disponibles. Respeta nombres de campos, métodos y choices
 exactamente.
 
-- **`Vigencia`** — `vigencia` (int).
-- **`TipoDocumentoCargue`** — `nombre`. Catálogo de tipos de documento.
-- **`RequisitoDocumental`** — `vigencia`, `tipo_documento`, `obligatorio` (bool).
+- **`Vigencia`**: `vigencia` (int).
+- **`TipoDocumentoCargue`**: `nombre`. Catálogo de tipos de documento.
+- **`RequisitoDocumental`**: `vigencia`, `tipo_documento`, `obligatorio` (bool).
   Único por `(vigencia, tipo_documento)`. **Define qué tipos se exigen por
   vigencia.** Es la fuente de verdad para la validación de completitud.
-- **`CuentaEntrega`** — `usuario`, `vigencia`, `mes`, `estado_revisores`,
+- **`CuentaEntrega`**: `usuario`, `vigencia`, `mes`, `estado_revisores`,
   `estado_supervisor` (ambos choices `ResultadoRevision`: `AP`/`RE`, nullable),
   `fecha_radicacion`, `fecha_aprobacion_revisores`, `fecha_cierre`, `comentario`.
   Métodos:
@@ -50,41 +50,41 @@ exactamente.
   - `cerrar()` → exige `estado_supervisor=AP`; setea `fecha_cierre`. NO valida
     presencia de documentos de cierre (eso es responsabilidad del servicio).
   - `clean()` → impide `estado_supervisor` no nulo si `estado_revisores != AP`.
-- **`DocumentoEntrega`** — `cuenta_entrega`, `numero_version`, `usuario`,
+- **`DocumentoEntrega`**: `cuenta_entrega`, `numero_version`, `usuario`,
   `comentario`. Único por `(cuenta_entrega, numero_version)`. `save()`
   autoincrementa `numero_version`. `clean()` **bloquea** crear entregas si
   `estado_supervisor == AP`. Es el **paquete versionado** de la entrega.
-- **`DocumentosCuentaCobro`** — `documento_entrega`, `tipo_documento`,
+- **`DocumentosCuentaCobro`**: `documento_entrega`, `tipo_documento`,
   `documento` (FileField), `estado` (choices `EstadoDocumento`:
   `PE`/`AP`/`RE`/`NA`, default `PE`), `comentario`. Único por
   `(documento_entrega, tipo_documento)`. Es **cada archivo cargado por tipo**, con
   su propio estado de revisión.
-- **`RevisionParaRadicacion`** — `cuenta_entrega`, `supervisor`, `comentario`,
+- **`RevisionParaRadicacion`**: `cuenta_entrega`, `supervisor`, `comentario`,
   `resultado` (choices `AP`/`AJ`/`RE`). Veredicto del supervisor sobre la entrega
   para radicarla.
-- **`AsignacionRevisor`** — `cuenta_entrega`, `supervisor`, `revisor`, `rol`
+- **`AsignacionRevisor`**: `cuenta_entrega`, `supervisor`, `revisor`, `rol`
   (`JU`/`AD`/`TE`), `estado` (`AC`/`DE`), `motivo_declinacion`. Índice único
   parcial: **una sola asignación `AC` por `(cuenta_entrega, rol)`**. Métodos:
   - `declinar(motivo)` → pasa la asignación a `DE` (libera el slot).
   - `reasignar_revisor(cuenta_entrega, rol, nuevo_revisor, supervisor)`
     (`@staticmethod`) → crea una nueva `AC` para ese rol si no hay otra activa.
-- **`RevisionCuentaCobro`** — `documento_entrega`, `asignacion` (FK a
+- **`RevisionCuentaCobro`**: `documento_entrega`, `asignacion` (FK a
   `AsignacionRevisor`), `rol`, `comentario`, `resultado` (`AP`/`AJ`/`RE`). Único
   por `(documento_entrega, rol)`. `clean()` valida que `rol` coincida con
   `asignacion.rol`, que la asignación esté `AC`, y que la cuenta no esté aprobada.
   Es **el veredicto de un rol sobre una entrega**.
-- **`DocumentoCierre`** — `cuenta_entrega`, `tipo_documento` (**FK a
+- **`DocumentoCierre`**: `cuenta_entrega`, `tipo_documento` (**FK a
   `TipoDocumentoCargue`**: los mismos tipos del catálogo de la entrega, ahora
   **firmados**), `documento` (FileField), `usuario`. Único por
   `(cuenta_entrega, tipo_documento)`. `clean()` **exige** `estado_supervisor == AP`
   (guarda inversa a `DocumentoEntrega`). Lo carga el **rol de radicación**, no se
   versiona.
-- **`TramiteFinal`** — `cuenta_entrega` (related_name `tramites_finales`), `tipo`
+- **`TramiteFinal`**: `cuenta_entrega` (related_name `tramites_finales`), `tipo`
   (`SF` Cargue en SIIFWEB / `SC` Cargue en SECOP II), `usuario`, `realizado` (bool),
   `evidencia` (FileField, opcional), `comentario`. Único por `(cuenta_entrega, tipo)`.
   `clean()` + `CheckConstraint` **impiden evidencia sin `realizado=True`**, y
   `clean()` exige evidencia al marcar realizado. Los dos pasos finales del flujo.
-- **`EventoTrazabilidad`** — `cuenta_entrega` (related_name `eventos`), `actor`,
+- **`EventoTrazabilidad`**: `cuenta_entrega` (related_name `eventos`), `actor`,
   `etapa` (`RAD`/`ASI`/`REV`/`SUP`/`CIE`), `evento` (str corto), `detalle`.
   Bitácora. **Lo escribes desde servicios en cada transición.**
 
@@ -127,10 +127,19 @@ Cada acción restringida a su actor.
 
 ### 1. Cargue y radicación
 1. El contratista crea una `CuentaEntrega` (vigencia + mes) y un `DocumentoEntrega`
-   (versión 1, autoincrementada por el `save()` del modelo — **no la calcules
+   (versión 1, autoincrementada por el `save()` del modelo: **no la calcules
    tú**).
 2. Carga sus archivos como `DocumentosCuentaCobro` (uno por `tipo_documento`,
-   estado inicial `PE`).
+   estado inicial `PE`). El archivo **sube directo al bucket**: el servidor firma
+   el permiso, el navegador transfiere mostrando el porcentaje (y puede
+   **cancelar** mientras viaja), y el servidor comprueba el objeto antes de crear
+   la fila. Cada documento cargado ofrece **Abrir**, **Descargar** (nombre
+   legible, no la clave del bucket) y **Quitar**.
+   - **Quitar** está disponible exactamente mientras lo está cargar: si el paquete
+     sigue abierto para añadir, lo está para corregir un cargue equivocado; al
+     entregar se congela para las dos cosas. Borra la fila y, **solo si la
+     transacción confirma**, el objeto del bucket. Queda registrado en la
+     trazabilidad: el documento desaparece, el hecho de haberlo quitado no.
 3. El contratista pulsa **"Entregar"** para enviar a revisión. Esta acción:
    - Valida completitud: toma los `RequisitoDocumental` con `obligatorio=True` de la
      vigencia de la cuenta (conjunto de `tipo_documento` exigidos) y los compara con
@@ -179,7 +188,7 @@ Cada acción restringida a su actor.
   nuevo_revisor, supervisor)` para crear otra activa del mismo rol. Si ya hay una
   activa, el método lanza error (es lo esperado: primero se declina).
 
-### 3. Revisión secuencial (GATING — lo central del módulo)
+### 3. Revisión secuencial (GATING: lo central del módulo)
 - Orden estricto: **técnico → jurídico → administrativo**. Este orden **NO está en
   los modelos; lo implementas en servicios.** (El técnico va primero porque es quien
   suele pedir más ajustes; así una devolución reinicia desde él y evita re-trabajo.)
@@ -257,7 +266,7 @@ forma **automática** cuando corresponde:
 
 ### 5. Cargue de documentos de cierre firmados (por el rol de radicación)
 1. Con `estado_supervisor == AP`, **el rol de radicación** carga los
-   `DocumentoCierre` — el `tipo_documento` es FK a `TipoDocumentoCargue` (los mismos
+   `DocumentoCierre`: el `tipo_documento` es FK a `TipoDocumentoCargue` (los mismos
    tipos del catálogo que la entrega, ahora **firmados**); el `usuario` del
    `DocumentoCierre` es el usuario de radicación. El `clean()` del modelo exige que
    la cuenta esté aprobada por el supervisor; respétalo. El servicio valida que el
@@ -270,6 +279,23 @@ forma **automática** cuando corresponde:
 3. Nota: con `estado_supervisor=AP`, los `clean()` de `DocumentoEntrega` y
    `RevisionCuentaCobro` bloquean nuevas entregas/revisiones del flujo de revisión.
    Es intencional. No lo evadas.
+4. **Un documento de cierre NO se quita.** Se permitió un tiempo, para corregir un
+   cargue equivocado, y resultó contraproducente: completar el cierre es lo que
+   habilita el cargue en SIIFWEB, así que retirar un documento después lo volvía a
+   deshabilitar y la cuenta parecía trabada sin que se viera el porqué. Además
+   `DocumentoCierre` es **único por (cuenta, tipo)**, de modo que tras retirarlo
+   tampoco se podía volver a cargar ese tipo.
+
+   ⚠️ **Contrapartida, por ahora asumida:** un cierre mal cargado **no se corrige
+   desde la aplicación**; hay que entrar al admin. Por eso el cargue avisa antes de
+   confirmar. La salida limpia, si el caso se repite, es **reemplazar el archivo sin
+   borrar la fila** (igual que la evidencia de un trámite final): no descompleta el
+   cierre, así que no desestabiliza el flujo, y esquiva la unicidad.
+5. **Aviso al contratista.** En cuanto los documentos de cierre están completos, el
+   contratista recibe en su bandeja "Ya se cargaron los documentos de cierre
+   firmados". Antes se quedaba sin noticias desde la aprobación del supervisor
+   hasta el cierre. Mientras falte alguno no se avisa nada: ese trabajo es de
+   radicación, no suyo.
 
 ### 6. Trámites finales (secuenciales, modelo `TramiteFinal`)
 Tras cargar los documentos de cierre firmados, siguen **dos pasos secuenciales**, cada
@@ -278,16 +304,29 @@ al marcar "sí" (`realizado=True`) se **exige adjuntar evidencia + comentario**.
 modelo ya impone que NO haya evidencia sin `realizado=True` (clean + CheckConstraint);
 NO evadas esa guarda. La autorización por rol se valida en servicios.
 
-1. **`SF` — Cargue en SIIFWEB.** Se habilita cuando los documentos de cierre firmados
+1. **`SF`: Cargue en SIIFWEB.** Se habilita cuando los documentos de cierre firmados
    están **completos** (§5). Pregunta: "¿Se cargó a SIIFWEB?". La responde **solo el
    revisor administrativo**. Al marcar sí → evidencia + comentario.
-2. **`SC` — Cargue en SECOP II.** Solo se habilita tras `SF` realizado. Pregunta:
+2. **`SC`: Cargue en SECOP II.** Solo se habilita tras `SF` realizado. Pregunta:
    "¿Se cargó a SECOP II?". La responde **solo el rol de secop**. Al marcar sí →
    evidencia + comentario.
 
 La secuencialidad (`SC` tras `SF`) es **lógica de servicio** (el modelo solo
 garantiza unicidad por `(cuenta_entrega, tipo)`). Registra un
 `EventoTrazabilidad(etapa=CIE)` por cada trámite marcado realizado.
+
+3. **La evidencia de un trámite respondido NO se reemplaza.** Un soporte registrado
+   queda como está.
+
+   Existió un tiempo, para corregir una captura equivocada, con una ventana que se
+   cerraba al responder el trámite siguiente o al cerrarse la cuenta. Se retiró por
+   dos razones: el cargue **pide confirmación antes de registrar nada**, que es
+   donde de verdad se evita el archivo equivocado, y un soporte que se puede cambiar
+   después debilita el valor probatorio del expediente. Un error detectado más tarde
+   se corrige por el admin, no por la aplicación.
+
+   El evento `Eventos.EVIDENCIA_REEMPLAZADA` se conserva en el catálogo: puede haber
+   cuentas con ese registro en la bitácora, y la bitácora no se reescribe.
 
 ### 7. Cierre del trámite
 1. Cuando los dos `TramiteFinal` (`SF`, `SC`) están `realizado=True`, el
@@ -342,8 +381,8 @@ tiempo de una cuenta muestra el historial **completo** a todo el que tenga acces
 esa cuenta. La cuenta **pertenece al contratista**; los demás acceden por haber
 intervenido. El acceso se restringe así:
 - **Contratista:** las cuentas donde él es `CuentaEntrega.usuario` (es el dueño).
-- **Revisor:** las cuentas donde tiene (o tuvo) una `AsignacionRevisor` —incluidas
-  las declinadas, para que conserve el historial de lo que alcanzó a tocar—.
+- **Revisor:** las cuentas donde tiene (o tuvo) una `AsignacionRevisor` (incluidas
+  las declinadas, para que conserve el historial de lo que alcanzó a tocar).
 - **Supervisor:** las cuentas donde aparece como `supervisor` en una
   `RevisionParaRadicacion` (validó para radicación) o en una `AsignacionRevisor`
   (asignó revisores). Es decir, su pertenencia se deriva de su intervención real,
@@ -381,11 +420,11 @@ flujo; NO se persiste ningún modelo `Notificacion` ni se toca el modelo. No hay
 
 **Tipos de notificación con color característico** (usa la paleta del proyecto;
 estos son los significados, no códigos hex):
-- **Asignación pendiente** (te asignaron y es tu turno) — un color.
-- **Revisión pendiente** (debes revisar) — otro.
-- **Devolución** (algo te fue devuelto para corregir) — color de alerta/devolución,
+- **Asignación pendiente** (te asignaron y es tu turno): un color.
+- **Revisión pendiente** (debes revisar): otro.
+- **Devolución** (algo te fue devuelto para corregir): color de alerta/devolución,
   el mismo que resalta devoluciones en la línea de tiempo (§8), para coherencia.
-- **Aprobación pendiente** (debes aprobar/decidir) — otro.
+- **Aprobación pendiente** (debes aprobar/decidir): otro.
 
 **Implementación:** un servicio `notificaciones_para(usuario)` que arma la lista de
 pendientes consultando estado + asignaciones + gating (reutiliza la lógica de
@@ -407,9 +446,9 @@ genérico: refleja el avance real de la cuenta seleccionada.
 **Etapas a representar** (en orden, derivadas del estado de la cuenta):
 1. Cargue y entrega (versión actual, si hubo devoluciones mostrar el número de
    versión).
-2. Radicación (pendiente / aprobada — `fecha_radicacion`).
+2. Radicación (pendiente / aprobada: `fecha_radicacion`).
 3. Asignación de revisores (pendiente / hecha).
-4. Revisión jurídica → administrativa → técnica (cuál está en curso, cuáles
+4. Revisión técnica → jurídica → administrativa (cuál está en curso, cuáles
    aprobadas, según las `RevisionCuentaCobro` de la última entrega).
 5. Decisión del supervisor para firma (`estado_supervisor`, `fecha_aprobacion_supervisor`).
 6. Cargue de documentos de cierre firmados por radicación (completo/incompleto).
@@ -426,6 +465,24 @@ genérico: refleja el avance real de la cuenta seleccionada.
   coherentes.
 - Visualmente, un stepper/timeline horizontal o vertical con la estética del
   proyecto; no inventes un estilo nuevo.
+
+**Tres reglas que hacen que el stepper no mienta tras una devolución.** Antes leía
+el *historial* de la cuenta ("ya pasó por radicación") en vez del estado de la
+*versión vigente* ("la versión 2 no ha salido del escritorio del contratista"), así
+que tras una devolución señalaba al revisor mientras el trabajo lo tenía el
+contratista. En una pantalla cuya razón de ser es saber de quién depende cada
+cuenta, eso lleva a perseguir a la persona equivocada.
+
+1. El cargue está hecho solo si **la versión vigente** fue entregada.
+2. La revisión está en curso solo si hay **una versión entregada** que revisar.
+3. El paso siguiente es **la próxima etapa que falte**, no la siguiente de la lista;
+   y el responsable de la revisión se deduce de quién no ha aprobado la versión
+   vigente, sin exigir que esté entregada, para poder nombrar al revisor que la va a
+   recibir.
+
+Las dos primeras corrigen el responsable actual; la tercera evita anunciar
+"Radicación" como paso siguiente en una cuenta que ya está radicada, y distingue
+sola los dos tipos de devolución (de revisor y de radicación) sin casos especiales.
 
 ## Reglas de negocio críticas (no omitir)
 
@@ -446,12 +503,40 @@ genérico: refleja el avance real de la cuenta seleccionada.
 - **Trazabilidad en cada transición:** escribe un `EventoTrazabilidad` en cada
   paso relevante (radicación, asignación, cada revisión, decisión del supervisor,
   cierre), con el actor real.
+- **Una cuenta VIGENTE por contratista, vigencia y mes.** Lo que decide es el
+  **estado** de las cuentas de ese periodo, no su simple existencia:
+  - **rechazada** (rechazo definitivo en radicación, o rechazo del supervisor) →
+    **no bloquea**: el contratista puede volver a presentar la cuenta del
+    periodo, tantas veces como haga falta;
+  - **aprobada** (el supervisor la aprobó, siga en cierre/trámites o ya cerrada)
+    → **bloquea**: ese periodo ya se tramitó;
+  - **en trámite** (cualquier otro estado) → **bloquea**, porque dos cuentas
+    abiertas del mismo periodo dejan el flujo sin un responsable claro.
+
+  Se valida en `services.crear_cuenta`, con `select_for_update()` sobre las filas
+  del periodo dentro de la transacción (dos peticiones simultáneas no deben crear
+  dos), y los dos estados se derivan en `services.cuenta_rechazada` /
+  `services.cuenta_aprobada`. No se puede imponer con una restricción de base de
+  datos porque `models.py` es definitivo.
+- **El paquete entregado no se modifica.** Pulsar "Entregar" lo congela: ni
+  adjuntar ni quitar. Mientras no se comprobaba, un POST directo colaba un
+  documento en una versión ya en revisión; entraba en `PENDIENTE` y dejaba al
+  revisor de turno **sin ninguna acción válida**: no podía aprobar (hay un
+  pendiente) ni devolver (no hay ninguno rechazado). Lo guardan
+  `selectors.puede_cargar_documentos` y `services.adjuntar_documento`.
+- **Rechazar un documento exige causal.** Marcar `RE` sin comentario dejaba al
+  contratista sin saber qué corregir, y la devolución de la cuenta se apoya
+  justamente en esos rechazos. Lo exige `services.revisar_documento`.
+- **Borrar un archivo es borrar la fila y, después, el objeto.** El borrado en el
+  bucket va en `transaction.on_commit`: dentro de la transacción, un rollback
+  dejaría la fila apuntando a un archivo que ya no existe. La bitácora conserva el
+  hecho aunque el archivo desaparezca.
 
 ## Control de acceso entre apps (aislación total, usando los mixins existentes)
 
 El proyecto aloja **dos apps** que comparten `User`/auth: este módulo (cuentas de
 cobro) y otra app de gestión. **Ya existe un sistema de permisos por rol** que DEBES
-reutilizar — no construyas middleware ni infraestructura nueva:
+reutilizar: no construyas middleware ni infraestructura nueva:
 - Base: `cuentas.mixins.RolRequeridoMixin` (login + bypass de superusuario + chequeo
   vía `tiene_rol(user, *roles)`), parametrizable con `roles_permitidos`.
 - Otra app (`contenido`): roles `DIRECTOR`, `COORDINADOR`, `FORMULADOR`; sus mixins
@@ -462,7 +547,7 @@ reutilizar — no construyas middleware ni infraestructura nueva:
   `ModuloRequeridoMixin` (cualquier actor del módulo, para vistas de consulta).
 - **Estos archivos (`roles.py`, `mixins.py`) ya existen. Úsalos; no los recrees.**
 
-### Aislación TOTAL — sin cruces
+### Aislación TOTAL: sin cruces
 **Los roles NO se cruzan entre apps.** Cada rol ve únicamente lo que le corresponde
 dentro de su propia app. En particular:
 - Ningún rol de la otra app (`DIRECTOR`, `COORDINADOR`, `FORMULADOR`) accede a las

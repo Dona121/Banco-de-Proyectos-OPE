@@ -9,13 +9,15 @@ como grupo: lo determina la `AsignacionRevisor` de cada cuenta. Basta con que el
 usuario pertenezca al grupo ``Revisor`` y esté asignado al rol correspondiente.
 
 Roles que SÍ son grupo:
-- ``Contratista`` — crea la cuenta, carga documentos y los de cierre.
-- ``Supervisor`` — radica, asigna revisores y decide para firma.
-- ``Revisor`` — revisa en su rol (JU/AD/TE) según la asignación.
-- ``Radicacion`` — aprueba radicación (como el supervisor) y responde el trámite
+- ``Contratista``: crea la cuenta, carga documentos y los de cierre.
+- ``Supervisor``: radica, asigna revisores y decide para firma.
+- ``Revisor``: revisa en su rol (JU/AD/TE) según la asignación.
+- ``Radicacion``: aprueba radicación (como el supervisor) y responde el trámite
   final de entrega de documentos de cierre (`EC`).
-- ``Secop`` — responde el trámite final de cargue en SECOP II (`SC`).
+- ``Secop``: responde el trámite final de cargue en SECOP II (`SC`).
 """
+
+from cuentas.roles import roles_de  # noqa: F401  (se reexporta: lo usan selectors y vistas)
 
 CONTRATISTA = "Contratista"
 SUPERVISOR = "Supervisor"
@@ -25,12 +27,9 @@ SECOP = "Secop"
 
 ROLES = (CONTRATISTA, SUPERVISOR, REVISOR, RADICACION, SECOP)
 
-
-def roles_de(user):
-    """Conjunto de nombres de grupo del usuario."""
-    if not user.is_authenticated:
-        return set()
-    return set(user.groups.values_list("name", flat=True))
+# `roles_de` se reutiliza de `cuentas.roles` (la app base de autenticación, no el
+# otro dominio): la consulta era idéntica y así los dos módulos comparten la
+# misma caché por petición en vez de preguntar los grupos cada uno por su lado.
 
 
 def tiene_rol(user, *nombres):

@@ -1,12 +1,19 @@
+{% comment %}
+Paginación de las listas. El enlace se arma con `{% querystring %}` (nativo desde
+Django 5.1), que conserva TODOS los parámetros de la petición y solo cambia la
+página. Antes se concatenaban a mano `q`, `estado_sel` y `proyecto_sel`, así que
+cualquier otro filtro (los de la bandeja de cuentas de cobro, por ejemplo) se
+perdía al pasar de página, y cada filtro nuevo había que registrarlo aquí.
+{% endcomment %}
 {% if is_paginated %}
 <nav class="mt-6 flex items-center justify-center gap-1">
   {% if page_obj.has_previous %}
-  <a href="?{% if q %}q={{ q }}&{% endif %}{% if estado_sel %}estado={{ estado_sel }}&{% endif %}{% if proyecto_sel %}proyecto={{ proyecto_sel }}&{% endif %}page={{ page_obj.previous_page_number }}"
+  <a href="{% querystring page=page_obj.previous_page_number %}"
      class="btn btn-outline px-3 py-1.5 text-sm">Anterior</a>
   {% endif %}
   <span class="px-4 py-1.5 text-sm text-slate-500">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
   {% if page_obj.has_next %}
-  <a href="?{% if q %}q={{ q }}&{% endif %}{% if estado_sel %}estado={{ estado_sel }}&{% endif %}{% if proyecto_sel %}proyecto={{ proyecto_sel }}&{% endif %}page={{ page_obj.next_page_number }}"
+  <a href="{% querystring page=page_obj.next_page_number %}"
      class="btn btn-outline px-3 py-1.5 text-sm">Siguiente</a>
   {% endif %}
 </nav>

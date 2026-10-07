@@ -23,7 +23,7 @@
   </div>
   <div class="card kpi kpi-azul rise rise-3 p-5 flex items-center gap-4">
     <span class="icon-chip chip-azul shrink-0"><svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg></span>
-    <div><p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Tiempo prom. revisión</p><p class="font-head text-3xl font-bold text-slate-800 leading-tight">{% if tiempo_prom is not None %}{{ tiempo_prom }}<span class="text-base font-semibold text-slate-400"> d</span>{% else %}—{% endif %}</p></div>
+    <div><p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Tiempo prom. revisión</p><p class="font-head text-3xl font-bold text-slate-800 leading-tight">{% if tiempo_prom is not None %}{{ tiempo_prom }}<span class="text-base font-semibold text-slate-400"> d</span>{% else %}-{% endif %}</p></div>
   </div>
   <div class="card kpi kpi-rojo rise rise-4 p-5 flex items-center gap-4">
     <span class="icon-chip chip-rojo shrink-0"><svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg></span>

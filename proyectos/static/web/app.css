@@ -67,17 +67,17 @@ h1, h2, h3, h4, .font-head { font-family: "Montserrat", system-ui, sans-serif; l
   display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
   padding: .55rem 1rem; font-size: .875rem; font-weight: 600; line-height: 1.25;
   border-radius: .65rem; border: 1px solid transparent; cursor: pointer;
-  transition: transform .12s ease, box-shadow .15s ease, background .15s ease, border-color .15s ease, color .15s ease;
+  transition: transform .12s ease, background .15s ease, border-color .15s ease, color .15s ease;
   white-space: nowrap; user-select: none;
 }
 .btn:focus-visible { outline: none; box-shadow: var(--ring); }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
-.btn-primary { background: var(--brand); color: #fff; box-shadow: var(--shadow-brand); }
+.btn-primary { background: var(--brand); color: #fff; }
 .btn-primary:hover { background: var(--brand-dark); }
 .btn-soft { background: var(--brand-light); color: var(--brand-dark); }
 .btn-soft:hover { background: #d6efde; }
-.btn-outline { background: #fff; color: #334155; border-color: #e2e8f0; box-shadow: var(--shadow-sm); }
+.btn-outline { background: #fff; color: #334155; border-color: #e2e8f0; }
 .btn-outline:hover { border-color: var(--brand); color: var(--brand-dark); }
 .btn-azul { background: var(--azul); color: #fff; }
 .btn-azul:hover { filter: brightness(.93); }
@@ -91,8 +91,8 @@ h1, h2, h3, h4, .font-head { font-family: "Montserrat", system-ui, sans-serif; l
   background: #fff; border: 1px solid var(--line); border-radius: 1rem;
   box-shadow: var(--shadow-card);
 }
-.card-hover { transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
-.card-hover:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: #d7e6dc; }
+/* Sin efecto de "levantar" la tarjeta al pasar el mouse: se quitó por decisión de
+   diseño. La clase `card-hover` ya no existe; si aparece en una plantilla, sobra. */
 
 /* KPI con franja de acento ------------------------------------------------ */
 .kpi { position: relative; overflow: hidden; }

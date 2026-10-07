@@ -1,61 +1,53 @@
-# ---- Python ----
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-dist/
-*.egg-info/
-.eggs/
-
-# ---- Entornos virtuales ----
-.venv/
-venv/
-env/
-ENV/
-
-# ---- uv ----
-# El lockfile (uv.lock) SÍ se versiona; el caché local no.
-.uv/
-
-# ---- Django ----
-*.log
-db.sqlite3
-db.sqlite3-journal
-local_settings.py
-
-# Archivos subidos por usuarios (no versionar)
-media/
-proyectos/media/
-
-# Estáticos recolectados (collectstatic)
-/staticfiles/
-proyectos/staticfiles/
-/static_root/
-
-# ---- Variables de entorno / secretos ----
+# --------------------------------------------------------------------------- #
+# Secretos. NUNCA versionar.
+# --------------------------------------------------------------------------- #
+# `proyectos/.env` tiene la cadena de conexión de Supabase (con contraseña) y la
+# SECRET_KEY. Ver `.env.example` para la lista completa de variables.
 .env
 .env.*
 !.env.example
-*.pem
 
-# ---- Editores / IDE ----
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
+# --------------------------------------------------------------------------- #
+# Entorno y caché de Python
+# --------------------------------------------------------------------------- #
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
 
-# ---- Sistema operativo ----
+# --------------------------------------------------------------------------- #
+# Datos locales, no del proyecto
+# --------------------------------------------------------------------------- #
+# Base de desarrollo y bases de prueba sueltas.
+*.sqlite3
+# Archivos subidos por los usuarios: en producción van a Supabase Storage, así
+# que lo que aparezca aquí son restos de pruebas locales.
+proyectos/media/
+
+# Plantilla de `uv init`, no la usa nadie (si ya está versionado, ignorarlo no lo
+# saca del repo: hay que borrarlo).
+main.py
+
+# --------------------------------------------------------------------------- #
+# Sistema operativo / editores
+# --------------------------------------------------------------------------- #
 .DS_Store
 Thumbs.db
 desktop.ini
+*.swp
+.idea/
+.vscode/
 
-# ---- Pruebas / cobertura ----
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.claude/
-CLAUDE.md
+# --------------------------------------------------------------------------- #
+# Estáticos recolectados
+# --------------------------------------------------------------------------- #
+# Salida de `collectstatic`, que el arranque en Railway ejecuta en cada deploy
+# (ver Procfile). Si eso cambiara y dejara de correrse, esta carpeta tendría que
+# volver al repo: sin el manifiesto, TODA página responde 500 por "Missing
+# staticfiles manifest entry", incluida la de error.
+proyectos/staticfiles/
+
+# OJO, lo que sigue NO es generado y va versionado a propósito:
+#   proyectos/static/web/tailwind.css   → CSS compilado a mano, no hay build de Node
+#   proyectos/static/vendor/*.js        → Alpine y HTMX, servidos desde el dominio

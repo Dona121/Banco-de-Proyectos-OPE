@@ -2,6 +2,8 @@
 from django import forms
 from django.contrib.auth import get_user_model
 
+from cuentas.validadores import ArchivoValidadoMixin
+
 from .models import (
     CuentaEntrega,
     DocumentosCuentaCobro,
@@ -9,7 +11,6 @@ from .models import (
     RevisionCuentaCobro,
     RevisionParaRadicacion,
     TipoDocumentoCargue,
-    TramiteFinal,
 )
 from .roles import REVISOR
 
@@ -56,7 +57,7 @@ class CuentaForm(EstilizadoMixin, forms.ModelForm):
         }
 
 
-class DocumentoCuentaForm(EstilizadoMixin, forms.ModelForm):
+class DocumentoCuentaForm(ArchivoValidadoMixin, EstilizadoMixin, forms.ModelForm):
     class Meta:
         model = DocumentosCuentaCobro
         fields = ("tipo_documento", "documento")
@@ -85,7 +86,7 @@ class DocumentoCuentaForm(EstilizadoMixin, forms.ModelForm):
 
 
 # --------------------------------------------------------------------------- #
-# Supervisor / radicación — radicación
+# Supervisor / radicación: radicación
 # --------------------------------------------------------------------------- #
 class RevisionRadicacionForm(EstilizadoMixin, forms.Form):
     resultado = forms.ChoiceField(
@@ -110,7 +111,7 @@ class DocumentoEstadoForm(EstilizadoMixin, forms.Form):
 
 
 # --------------------------------------------------------------------------- #
-# Supervisor — asignación / reasignación
+# Supervisor: asignación / reasignación
 # --------------------------------------------------------------------------- #
 class AsignacionForm(EstilizadoMixin, forms.Form):
     rol = forms.ChoiceField(label="Rol", choices=RevisionCuentaCobro.Rol.choices)
@@ -157,7 +158,7 @@ class DeclinarForm(EstilizadoMixin, forms.Form):
 
 
 # --------------------------------------------------------------------------- #
-# Supervisor — decisión final
+# Supervisor: decisión final
 # --------------------------------------------------------------------------- #
 class DecisionSupervisorForm(EstilizadoMixin, forms.Form):
     resultado = forms.ChoiceField(
@@ -180,7 +181,7 @@ class DecisionSupervisorForm(EstilizadoMixin, forms.Form):
 # --------------------------------------------------------------------------- #
 # Cierre (lo carga el rol de radicación: mismos tipos del catálogo, firmados)
 # --------------------------------------------------------------------------- #
-class DocumentoCierreForm(EstilizadoMixin, forms.Form):
+class DocumentoCierreForm(ArchivoValidadoMixin, EstilizadoMixin, forms.Form):
     # Form plano (no ModelForm): el clean() de DocumentoCierre accede a
     # cuenta_entrega, que aún no existe durante la validación. El servicio
     # construye la instancia y dispara full_clean con la cuenta ya asignada.
@@ -212,7 +213,7 @@ class DocumentoCierreForm(EstilizadoMixin, forms.Form):
 # --------------------------------------------------------------------------- #
 # Trámites finales (SF / SC)
 # --------------------------------------------------------------------------- #
-class TramiteFinalForm(EstilizadoMixin, forms.Form):
+class TramiteFinalForm(ArchivoValidadoMixin, EstilizadoMixin, forms.Form):
     # Responder un trámite es marcar "sí" (realizado): exige evidencia y
     # comentario. La guarda de "evidencia exige realizado" la impone el modelo.
     evidencia = forms.FileField(label="Evidencia")

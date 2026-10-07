@@ -63,17 +63,27 @@
                 {% if d.comentario %}<p class="text-xs text-slate-400">{{ d.comentario }}</p>{% endif %}
               </td>
               <td>{% cc_badge d.estado proceso="documento" %}</td>
-              <td><a href="{{ d.documento.url }}" target="_blank" class="text-brand font-semibold hover:underline">Abrir</a></td>
+              <td class="whitespace-nowrap">
+                <a href="{{ d.documento.url }}" target="_blank" class="text-brand font-semibold hover:underline">Abrir</a>
+                <a href="{% url 'cuentas_cobro:descargar' cuenta.pk 'documento' d.pk %}" class="ml-3 text-slate-500 font-semibold hover:underline">Descargar</a>
+                {% if puede_cargar %}
+                {% url 'cuentas_cobro:eliminar_archivo' cuenta.pk 'documento' d.pk as u_eliminar %}
+                <span class="ml-3">{% include 'components/eliminar_archivo.html' with accion=u_eliminar %}</span>
+                {% endif %}
+              </td>
               {% if puede_marcar_docs %}
               <td>
-                <form method="post" action="{% url 'cuentas_cobro:documento_revisar' d.pk %}" class="flex items-center gap-2">
+                <form method="post" action="{% url 'cuentas_cobro:documento_revisar' d.pk %}" class="flex items-center gap-2"
+                      x-data="{ estado: '{{ d.estado }}' }">
                   {% csrf_token %}
-                  <select name="estado" class="rounded-lg border border-slate-300 bg-white py-1.5 px-2 text-xs focus:border-brand focus:ring-2 focus:ring-brand/30 focus:outline-none">
+                  <select name="estado" x-model="estado" class="rounded-lg border border-slate-300 bg-white py-1.5 px-2 text-xs focus:border-brand focus:ring-2 focus:ring-brand/30 focus:outline-none">
                     {% for code, label in estado_doc_choices %}
                     <option value="{{ code }}" {% if code == d.estado %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
                   </select>
-                  <input name="comentario" value="{{ d.comentario }}" placeholder="Comentario"
+                  <input name="comentario" value="{{ d.comentario }}"
+                         :placeholder="estado === 'RE' ? 'Causal (obligatoria)' : 'Comentario'"
+                         :required="estado === 'RE'" placeholder="Comentario"
                          class="w-32 rounded-lg border border-slate-300 bg-white py-1.5 px-2 text-xs focus:border-brand focus:ring-2 focus:ring-brand/30 focus:outline-none">
                   <button class="btn btn-soft px-2 py-1 text-xs">Guardar</button>
                 </form>
@@ -90,13 +100,9 @@
       {% if puede_marcar_docs %}{% cc_leyenda "documento" %}{% endif %}
 
       {% if puede_cargar and faltantes %}
-      <form method="post" action="{% url 'cuentas_cobro:documento_cargar' cuenta.pk %}" enctype="multipart/form-data"
-            class="mt-5 border-t border-slate-100 pt-5 grid gap-4 sm:grid-cols-2">
-        {% csrf_token %}
-        {% include 'components/form_field.html' with field=doc_form.tipo_documento %}
-        {% include 'components/form_field.html' with field=doc_form.documento %}
-        <div class="sm:col-span-2"><button class="btn btn-soft">Cargar documento</button></div>
-      </form>
+      {% url 'cuentas_cobro:subida_firmar' cuenta.pk 'entrega' as u_firmar %}
+      {% url 'cuentas_cobro:subida_confirmar' cuenta.pk 'entrega' as u_confirmar %}
+      {% include 'components/subida_directa.html' with firmar_url=u_firmar confirmar_url=u_confirmar tipos=tipos_cargables boton="Cargar documento" %}
       {% endif %}
 
       {% if puede_entregar %}
@@ -106,7 +112,7 @@
         <p class="text-sm text-slate-600">Cargaste todos los documentos obligatorios. Envíalos a revisión.</p>
         <button class="btn btn-primary">Entregar</button>
       </form>
-      {% elif puede_cargar and entrega_enviada %}
+      {% elif es_contratista_dueno and entrega_enviada %}
       <p class="mt-5 border-t border-slate-100 pt-5 text-sm text-brand-dark">
         Entregado. A la espera de la revisión de radicación.
       </p>
@@ -205,6 +211,8 @@
         <li class="flex items-center gap-3 text-sm">
           <span class="font-medium text-slate-700">{{ d.tipo_documento.nombre }} <span class="text-slate-400 font-normal">(firmado)</span></span>
           <a href="{{ d.documento.url }}" target="_blank" class="text-brand font-semibold hover:underline">Abrir</a>
+          <a href="{% url 'cuentas_cobro:descargar' cuenta.pk 'cierre' d.pk %}" class="text-slate-500 font-semibold hover:underline">Descargar</a>
+          {% comment %}Un documento de cierre no se quita: ver la nota del cargue, abajo.{% endcomment %}
           <span class="ml-auto text-xs text-slate-400">{{ d.fecha_creacion|naturaltime }}</span>
         </li>
         {% empty %}
@@ -212,13 +220,9 @@
         {% endfor %}
       </ul>
       {% if puede_cargar_cierre %}
-      <form method="post" action="{% url 'cuentas_cobro:cierre_cargar' cuenta.pk %}" enctype="multipart/form-data"
-            class="grid gap-4 sm:grid-cols-2 border-t border-slate-100 pt-4">
-        {% csrf_token %}
-        {% include 'components/form_field.html' with field=cierre_form.tipo_documento %}
-        {% include 'components/form_field.html' with field=cierre_form.documento %}
-        <div class="sm:col-span-2"><button class="btn btn-soft">Cargar documento firmado</button></div>
-      </form>
+      {% url 'cuentas_cobro:subida_firmar' cuenta.pk 'cierre' as u_firmar_cierre %}
+      {% url 'cuentas_cobro:subida_confirmar' cuenta.pk 'cierre' as u_confirmar_cierre %}
+      {% include 'components/subida_directa.html' with firmar_url=u_firmar_cierre confirmar_url=u_confirmar_cierre tipos=cierre_faltantes boton="Cargar documento firmado" advertencia="Un documento de cierre no se puede quitar después. Revisa que sea el archivo firmado correcto antes de confirmar." %}
       {% if cierre_faltantes %}
       <p class="mt-3 text-xs text-slate-400">
         Faltan: {% for t in cierre_faltantes %}{{ t.nombre }}{% if not forloop.last %}, {% endif %}{% endfor %}.
@@ -242,15 +246,13 @@
           <p class="mt-1 text-sm text-slate-500">{{ f.pregunta }}</p>
           {% if f.realizado and f.tramite %}
             {% if f.tramite.comentario %}<p class="mt-1 text-xs text-slate-400">{{ f.tramite.comentario }}</p>{% endif %}
-            {% if f.tramite.evidencia %}<a href="{{ f.tramite.evidencia.url }}" target="_blank" class="text-brand text-sm font-semibold hover:underline">Ver evidencia</a>{% endif %}
+            {% if f.tramite.evidencia %}<a href="{{ f.tramite.evidencia.url }}" target="_blank" class="text-brand text-sm font-semibold hover:underline">Ver evidencia</a>
+            <a href="{% url 'cuentas_cobro:descargar' cuenta.pk 'evidencia' f.tramite.pk %}" class="ml-3 text-slate-500 text-sm font-semibold hover:underline">Descargar</a>{% endif %}
+            {% comment %}Un trámite respondido no se reemplaza: la pantalla de confirmación es la que evita el archivo equivocado, antes de registrarlo.{% endcomment %}
           {% elif f.puede %}
-          <form method="post" action="{% url 'cuentas_cobro:tramite' cuenta.pk f.tipo %}" enctype="multipart/form-data"
-                class="mt-3 space-y-3 border-t border-slate-100 pt-3">
-            {% csrf_token %}
-            {% include 'components/form_field.html' with field=tramite_form.evidencia %}
-            {% include 'components/form_field.html' with field=tramite_form.comentario %}
-            <button class="btn btn-primary">Marcar como realizado</button>
-          </form>
+          {% url 'cuentas_cobro:subida_firmar' cuenta.pk 'tramite' as u_firmar_tramite %}
+          {% url 'cuentas_cobro:subida_confirmar' cuenta.pk 'tramite' as u_confirmar_tramite %}
+          {% include 'components/subida_directa.html' with firmar_url=u_firmar_tramite confirmar_url=u_confirmar_tramite tipos=None con_comentario=1 campo_oculto="tipo_tramite" valor_oculto=f.tipo etiqueta_archivo="Evidencia" boton="Marcar como realizado" advertencia=f.aviso %}
           {% endif %}
         </div>
         {% endfor %}

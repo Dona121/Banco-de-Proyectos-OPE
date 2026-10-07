@@ -35,9 +35,16 @@ if not SECRET_KEY:
     )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+# Por defecto apagado: hay que pedirlo explícitamente con DEBUG=1, y solo tiene
+# sentido en local. Antes estaba fijo en False y para depurar había que editar
+# este archivo.
+DEBUG = os.getenv("DEBUG", "0") == "1"
 
-ALLOWED_HOSTS = ["*"]
+# Hosts admitidos, separados por comas. El valor por omisión ("*") es el que
+# usa el despliegue: Railway asigna el dominio y lo cambia sin avisar. Si algún
+# día el dominio es fijo, acotarlo aquí por entorno cierra el paso a los ataques
+# por cabecera Host sin tocar el código.
+ALLOWED_HOSTS = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "*").split(",") if h.strip()]
 
 
 # Application definition
@@ -129,6 +136,16 @@ STORAGES = {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
 }
+
+if DEBUG:
+    # En desarrollo, estáticos sin manifiesto. Con el manifiesto, cualquier
+    # archivo nuevo o cambiado obliga a correr `collectstatic` antes de poder
+    # abrir la página: si falta la entrada, Django lanza "Missing staticfiles
+    # manifest entry" y la respuesta es un 500 (incluida la propia página de
+    # error, que también extiende base.html).
+    STORAGES["staticfiles"] = {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+    }
 
 
 # Database
@@ -247,6 +264,45 @@ SECURE_REFERRER_POLICY = "same-origin"
 # Impedir que el navegador adivine el tipo de contenido de un archivo servido
 # (relevante porque la plataforma sirve documentos subidos por usuarios).
 SECURE_CONTENT_TYPE_NOSNIFF = True
+
+
+# --------------------------------------------------------------------------- #
+# Registro de eventos (logging)
+# --------------------------------------------------------------------------- #
+# El handler de consola que trae Django por defecto está filtrado por
+# `require_debug_true`, y el de correo exige ADMINS configurado. Con DEBUG=False
+# y sin ADMINS eso deja los errores 500 SIN rastro: no aparecen en los logs del
+# servicio y el fallo solo se ve como una página de error en el navegador. Esta
+# configuración manda todo a la salida estándar, que es de donde Railway (y
+# cualquier PaaS) lee los logs.
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "estandar": {
+            "format": "{levelname} {asctime} {name} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "consola": {
+            "class": "logging.StreamHandler",
+            "formatter": "estandar",
+        },
+    },
+    "root": {"handlers": ["consola"], "level": "WARNING"},
+    "loggers": {
+        # `django.request` emite el traceback completo de cada 500 por este
+        # camino, así que basta con no filtrarlo.
+        "django": {
+            "handlers": ["consola"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+    },
+}
 
 # Media files (archivos subidos por los formuladores)
 MEDIA_URL = 'media/'

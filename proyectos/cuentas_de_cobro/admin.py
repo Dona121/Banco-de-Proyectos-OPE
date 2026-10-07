@@ -156,7 +156,8 @@ class CuentaEntregaAdmin(ModelAdmin):
     ordering = ("-fecha_creacion",)
     autocomplete_fields = ("usuario", "vigencia")
     readonly_fields = (
-        "fecha_radicacion", "fecha_aprobacion_revisores", "fecha_cierre",
+        "fecha_radicacion", "fecha_aprobacion_revisores",
+        "fecha_aprobacion_supervisor", "fecha_cierre",
         "fecha_creacion", "fecha_actualizacion",
     )
     inlines = (
@@ -167,11 +168,11 @@ class CuentaEntregaAdmin(ModelAdmin):
 
     @display(description=_("Revisores"), label=RESULTADO_LABELS)
     def estado_revisores_badge(self, obj):
-        return obj.get_estado_revisores_display() or "—"
+        return obj.get_estado_revisores_display() or "-"
 
     @display(description=_("Supervisor"), label=RESULTADO_LABELS)
     def estado_supervisor_badge(self, obj):
-        return obj.get_estado_supervisor_display() or "—"
+        return obj.get_estado_supervisor_display() or "-"
 
 
 @admin.register(DocumentoEntrega)
@@ -222,9 +223,28 @@ class TramiteFinalAdmin(ModelAdmin):
 
 @admin.register(EventoTrazabilidad)
 class EventoTrazabilidadAdmin(ModelAdmin):
+    """Bitácora de solo lectura.
+
+    Es el registro de auditoría del flujo: quién hizo qué y cuándo. Si se puede
+    editar o borrar desde aquí, deja de servir como evidencia. Las entradas las
+    escribe la capa de servicios en cada transición; el inline de la cuenta ya
+    era de solo lectura y esta pantalla se había quedado atrás.
+    """
+
     list_display = ("cuenta_entrega", "etapa", "evento", "actor", "fecha_creacion")
     list_filter = (("etapa", ChoicesDropdownFilter),)
     search_fields = ("evento", "cuenta_entrega__usuario__username")
     ordering = ("fecha_creacion",)
-    autocomplete_fields = ("cuenta_entrega", "actor")
-    readonly_fields = ("fecha_creacion", "fecha_actualizacion")
+    readonly_fields = (
+        "cuenta_entrega", "etapa", "evento", "actor", "detalle",
+        "fecha_creacion", "fecha_actualizacion",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

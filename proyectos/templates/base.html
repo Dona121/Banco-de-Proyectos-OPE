@@ -21,9 +21,24 @@
   {% endcomment %}
   <link rel="stylesheet" href="{% static 'web/tailwind.css' %}">
   <link rel="stylesheet" href="{% static 'web/app.css' %}">
-  <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
-  {% comment %}Alpine con version fija: `3.x.x` es flotante y cualquier release rompia la app sin tocar el codigo.{% endcomment %}
-  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.16.3/dist/cdn.min.js" defer></script>
+  {% comment %}
+  HTMX y Alpine servidos desde el propio dominio, no desde un CDN. Por lo mismo
+  que Tailwind: dependian de unpkg/jsdelivr en cada carga, sin comprobacion de
+  integridad, en una plataforma que maneja documentos oficiales. Al estar en
+  static/vendor con la version en el nombre, WhiteNoise los sirve versionados y
+  cacheados, y actualizarlos es un cambio deliberado y revisable.
+  {% endcomment %}
+  <script src="{% static 'vendor/htmx-1.9.12.min.js' %}" defer></script>
+  {% comment %}
+  OJO con el orden: este script tiene que ir ANTES de Alpine. El bundle de Alpine
+  termina con `queueMicrotask(() => Alpine.start())`, así que arranca y dispara
+  `alpine:init` antes de que se ejecute el siguiente script diferido. Si se carga
+  después, el componente se registra cuando el evento ya pasó, `x-data` falla y
+  Alpine oculta lo que depende de él: el botón de subir aparecía un instante y
+  desaparecía.
+  {% endcomment %}
+  <script src="{% static 'web/subidas.js' %}" defer></script>
+  <script src="{% static 'vendor/alpine-3.16.3.min.js' %}" defer></script>
 </head>
 <body class="h-full bg-slate-50 font-sans text-slate-700 antialiased">
   {% block body %}{% endblock %}

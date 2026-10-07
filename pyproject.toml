@@ -8,12 +8,16 @@ dependencies = [
     "boto3>=1.43.36",
     "dj-database-url>=3.1.2",
     "django==5.2",
-    "django-import-export>=4.4.1",
     "django-storages>=1.14.6",
-    "django-unfold>=0.97.0",
+    # Con tope de versión: Unfold publica estáticos propios, y si un build resuelve
+    # una versión nueva sin correr `collectstatic`, el /admin/ entero responde 500
+    # por "Missing staticfiles manifest entry".
+    "django-unfold>=0.97.0,<0.98",
     "gunicorn>=26.0.0",
     "openpyxl>=3.1.5",
-    "psycopg2>=2.9.12",
+    # La variante `-binary` trae ruedas precompiladas: `psycopg2` a secas compila
+    # desde fuente y no se puede instalar sin libpq-dev.
+    "psycopg2-binary>=2.9.12",
     "python-dotenv>=1.2.2",
     "reportlab>=4.5.1",
     "whitenoise>=6.12.0",

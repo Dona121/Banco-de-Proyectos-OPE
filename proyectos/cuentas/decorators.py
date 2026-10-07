@@ -1,4 +1,4 @@
-"""Decoradores de control de acceso por rol para vistas basadas en función."""
+"""Control de acceso por rol para vistas función (las CBV usan ``mixins``)."""
 from functools import wraps
 
 from django.contrib.auth.decorators import login_required
@@ -8,16 +8,23 @@ from .roles import tiene_rol
 
 
 def rol_requerido(*roles):
-    """Permite el acceso solo a usuarios con alguno de ``roles`` (o superuser)."""
+    """Exige login y pertenencia a alguno de ``roles``. El superusuario pasa.
 
-    def decorador(view):
-        @wraps(view)
+    Equivalente a ``RolRequeridoMixin`` para las vistas que son funciones, como
+    la generación de reportes::
+
+        @rol_requerido(*ROLES_MODULO)
+        def reporte_x(request): ...
+    """
+
+    def decorador(vista):
+        @wraps(vista)
         @login_required
-        def _wrapped(request, *args, **kwargs):
-            if request.user.is_superuser or tiene_rol(request.user, *roles):
-                return view(request, *args, **kwargs)
-            raise PermissionDenied("No tienes permiso para acceder a esta sección.")
+        def envoltura(request, *args, **kwargs):
+            if not (request.user.is_superuser or tiene_rol(request.user, *roles)):
+                raise PermissionDenied("No tienes permiso para acceder a esta sección.")
+            return vista(request, *args, **kwargs)
 
-        return _wrapped
+        return envoltura
 
     return decorador

@@ -1,12 +1,12 @@
 """Vistas de la aplicación web de negocio (MVT)."""
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db.models import Count, Q
-from django.http import HttpResponse
+from django.db import transaction
+from django.db.models import Q
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
-from django.urls import reverse, reverse_lazy
+from django.urls import reverse
 from django.utils import timezone
 from django.views import View
 from django.views.generic import (
@@ -18,18 +18,19 @@ from django.views.generic import (
     UpdateView,
 )
 
-from contenido.models import (
-    Actividades,
-    ActividadEntrega,
-    Documentos,
-    Proyectos,
-    Revisiones,
+from contenido.models import Actividades, Documentos, Proyectos, Revisiones
+from cuentas.decorators import rol_requerido
+from cuentas.subidas import confirmar_subida, firmar_subida, url_de_descarga
+from cuentas.validadores import validar_extension
+from cuentas.mixins import (
+    DirectorRequeridoMixin,
+    GestionRequeridoMixin,
+    ModuloProyectosRequeridoMixin,
 )
-from cuentas.mixins import DirectorRequeridoMixin, GestionRequeridoMixin
 from cuentas.roles import (
     COORDINADOR,
     DIRECTOR,
-    FORMULADOR,
+    ROLES_MODULO,
     es_consulta,
     es_coordinador,
     es_director,
@@ -58,7 +59,23 @@ Estado = Actividades.EstadoActividad
 # Dashboard (indicadores por rol)
 # =========================================================================== #
 class DashboardView(LoginRequiredMixin, TemplateView):
-    """Dashboard específico según el rol (Director / Coordinador / Formulador)."""
+    """Panel de inicio, con indicadores según el rol.
+
+    Es la pantalla de entrada común (el login de TODOS los roles aterriza aquí),
+    así que no lleva mixin de dominio: ponérselo dejaría fuera a los roles de
+    cuentas de cobro. En su lugar, a quien solo pertenece a ese módulo se le
+    manda a su bandeja.
+    """
+
+    def get(self, request, *args, **kwargs):
+        if self._rol() == "generico":
+            # Import diferido: no acoplar los dominios al importar (mismo motivo
+            # que en `metrics.consulta`).
+            from cuentas_de_cobro.roles import usa_modulo
+
+            if usa_modulo(request.user):
+                return redirect("cuentas_cobro:bandeja")
+        return super().get(request, *args, **kwargs)
 
     def _rol(self):
         user = self.request.user
@@ -94,26 +111,45 @@ class DashboardView(LoginRequiredMixin, TemplateView):
 # =========================================================================== #
 # Proyectos
 # =========================================================================== #
-class ProyectoListView(LoginRequiredMixin, ListView):
+class ProyectoListView(ModuloProyectosRequeridoMixin, ListView):
     template_name = "web/proyectos/lista.html"
     context_object_name = "proyectos"
     paginate_by = 12
 
+    # Parámetro de la querystring → campo por el que filtra.
+    FILTROS = {
+        "director": "creador_por_id",
+        "coordinador": "asignado_a_id",
+        "formulador": "actividades__asignado_a_id",
+    }
+
     def get_queryset(self):
         qs = selectors.proyectos_visibles(self.request.user)
+        self.filtros = {}
+        for parametro, campo in self.FILTROS.items():
+            # Los ids llegan de la querystring: filtrar por algo que no sea un
+            # número hace que el ORM lance ValueError y la página responda 500.
+            valor = self.request.GET.get(parametro, "").strip()
+            self.filtros[parametro] = valor if valor.isdigit() else ""
+            if self.filtros[parametro]:
+                qs = qs.filter(**{campo: self.filtros[parametro]})
         q = self.request.GET.get("q", "").strip()
         if q:
             qs = qs.filter(nombre__icontains=q)
-        return qs.order_by("-fecha_creacion")
+        # `distinct` por el filtro de formulador, que entra por las actividades y
+        # repetiría el proyecto una vez por actividad suya.
+        return qs.distinct().order_by("-fecha_creacion")
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         ctx["q"] = self.request.GET.get("q", "")
+        ctx["filtros"] = self.filtros
+        ctx.update(selectors.opciones_de_filtro(self.request.user))
         ctx["breadcrumbs"] = [("Proyectos", None)]
         return ctx
 
 
-class ProyectoDetailView(LoginRequiredMixin, DetailView):
+class ProyectoDetailView(ModuloProyectosRequeridoMixin, DetailView):
     template_name = "web/proyectos/detalle.html"
     context_object_name = "proyecto"
 
@@ -194,7 +230,7 @@ class ProyectoUpdateView(DirectorRequeridoMixin, UpdateView):
 # =========================================================================== #
 # Actividades
 # =========================================================================== #
-class ActividadListView(LoginRequiredMixin, ListView):
+class ActividadListView(ModuloProyectosRequeridoMixin, ListView):
     template_name = "web/actividades/lista.html"
     context_object_name = "actividades"
     paginate_by = 15
@@ -203,11 +239,14 @@ class ActividadListView(LoginRequiredMixin, ListView):
         qs = selectors.actividades_visibles(self.request.user)
         estado = self.request.GET.get("estado", "")
         q = self.request.GET.get("q", "").strip()
-        proyecto = self.request.GET.get("proyecto", "")
+        # El id llega de la querystring: si no es un número, filtrar por él hace
+        # que el ORM lance ValueError y la página responda 500.
+        proyecto = self.request.GET.get("proyecto", "").strip()
+        self.proyecto_sel = proyecto if proyecto.isdigit() else ""
         if estado:
             qs = qs.filter(estado=estado)
-        if proyecto:
-            qs = qs.filter(proyecto_id=proyecto)
+        if self.proyecto_sel:
+            qs = qs.filter(proyecto_id=self.proyecto_sel)
         if q:
             qs = qs.filter(Q(nombre__icontains=q) | Q(proyecto__nombre__icontains=q))
         return qs.order_by("fecha_vencimiento")
@@ -218,13 +257,13 @@ class ActividadListView(LoginRequiredMixin, ListView):
         ctx["estado_sel"] = self.request.GET.get("estado", "")
         ctx["q"] = self.request.GET.get("q", "")
         ctx["proyectos"] = selectors.proyectos_visibles(self.request.user)
-        ctx["proyecto_sel"] = self.request.GET.get("proyecto", "")
+        ctx["proyecto_sel"] = self.proyecto_sel
         ctx["ahora"] = timezone.now()
         ctx["breadcrumbs"] = [("Actividades", None)]
         return ctx
 
 
-class ActividadDetailView(LoginRequiredMixin, DetailView):
+class ActividadDetailView(ModuloProyectosRequeridoMixin, DetailView):
     template_name = "web/actividades/detalle.html"
     context_object_name = "actividad"
 
@@ -395,7 +434,7 @@ class SubactividadCreateView(GestionRequeridoMixin, View):
 # =========================================================================== #
 # Entregas
 # =========================================================================== #
-class EntregaCreateView(LoginRequiredMixin, FormView):
+class EntregaCreateView(ModuloProyectosRequeridoMixin, FormView):
     """El formulador registra una nueva entrega (versión) de su actividad."""
 
     template_name = "web/entregas/form.html"
@@ -439,7 +478,7 @@ class EntregaCreateView(LoginRequiredMixin, FormView):
         return ctx
 
 
-class EntregaDetailView(LoginRequiredMixin, DetailView):
+class EntregaDetailView(ModuloProyectosRequeridoMixin, DetailView):
     template_name = "web/entregas/detalle.html"
     context_object_name = "entrega"
 
@@ -472,7 +511,7 @@ class EntregaDetailView(LoginRequiredMixin, DetailView):
         return ctx
 
 
-class DocumentoCreateView(LoginRequiredMixin, View):
+class DocumentoCreateView(ModuloProyectosRequeridoMixin, View):
     """Adjunta un documento a una entrega (formulador dueño de la entrega)."""
 
     def post(self, request, entrega_pk):
@@ -499,7 +538,127 @@ class DocumentoCreateView(LoginRequiredMixin, View):
 # =========================================================================== #
 # Revisiones
 # =========================================================================== #
-class RevisionCreateView(LoginRequiredMixin, View):
+# =========================================================================== #
+# Subida directa al bucket (con porcentaje de avance)
+# =========================================================================== #
+# El archivo no pasa por el servidor; el por qué y el flujo completo están en
+# `cuentas/subidas.py`. Aquí solo el permiso y el registro.
+PREFIJO_DOCUMENTOS = "documentos/%Y/%m/"
+
+
+class _SubidaEntregaMixin(ModuloProyectosRequeridoMixin, View):
+    """Base de los dos pasos: misma entrega, mismo permiso."""
+
+    def entrega_permitida(self, request, entrega_pk):
+        entrega = get_object_or_404(
+            selectors.entregas_visibles(request.user), pk=entrega_pk
+        )
+        # El mismo criterio que `DocumentoCreateView`: documenta el ejecutor de la
+        # entrega, y no una vez aprobada la actividad.
+        if not (request.user.is_superuser or entrega.usuario_id == request.user.id):
+            raise PermissionDenied()
+        if entrega.actividad.estado == Estado.APROBADA:
+            raise PermissionDenied("La actividad ya está aprobada.")
+        return entrega
+
+
+class SubidaFirmarView(_SubidaEntregaMixin):
+    def post(self, request, entrega_pk):
+        entrega = self.entrega_permitida(request, entrega_pk)
+        try:
+            nombre = (request.POST.get("nombre_documento") or "").strip()
+            if not nombre:
+                raise ValidationError("Escribe el nombre del documento.")
+            archivo = request.POST.get("nombre", "")
+            validar_extension(archivo)
+            datos = firmar_subida(
+                prefijo=PREFIJO_DOCUMENTOS,
+                nombre_archivo=archivo,
+                content_type=request.POST.get("content_type")
+                or "application/octet-stream",
+                contexto={"entrega": entrega.pk},
+            )
+        except ValidationError as exc:
+            return JsonResponse({"error": "; ".join(exc.messages)}, status=400)
+        return JsonResponse(datos)
+
+
+class SubidaConfirmarView(_SubidaEntregaMixin):
+    def post(self, request, entrega_pk):
+        entrega = self.entrega_permitida(request, entrega_pk)
+        try:
+            datos = confirmar_subida(request.POST.get("token", ""))
+            if datos.get("entrega") != entrega.pk:
+                raise ValidationError("La confirmación no corresponde a esta entrega.")
+            nombre = (request.POST.get("nombre_documento") or "").strip()
+            if not nombre:
+                raise ValidationError("Escribe el nombre del documento.")
+            documento = Documentos(actividad_entrega=entrega, nombre=nombre)
+            # Solo se guarda la ruta: el navegador ya subió el archivo al bucket.
+            documento.archivo.name = datos["clave"]
+            documento.save()
+        except ValidationError as exc:
+            return JsonResponse({"error": "; ".join(exc.messages)}, status=400)
+        messages.success(request, "Documento adjuntado.")
+        return JsonResponse({"ok": True})
+
+
+class DocumentoEliminarView(ModuloProyectosRequeridoMixin, View):
+    """Quita un documento adjunto de una entrega, y su archivo del bucket.
+
+    Mismo criterio que para adjuntarlo: lo hace quien hizo la entrega, mientras
+    la actividad no esté aprobada. Una actividad aprobada cierra el expediente, y
+    los documentos que respaldan esa aprobación no se tocan.
+    """
+
+    def post(self, request, pk):
+        documento = get_object_or_404(
+            Documentos.objects.select_related("actividad_entrega__actividad"), pk=pk
+        )
+        entrega = get_object_or_404(
+            selectors.entregas_visibles(request.user),
+            pk=documento.actividad_entrega_id,
+        )
+        permitido = request.user.is_superuser or entrega.usuario_id == request.user.id
+        if not permitido or entrega.actividad.estado == Estado.APROBADA:
+            raise PermissionDenied()
+        nombre, archivo = documento.nombre, documento.archivo
+        documento.delete()
+        # Tras confirmar: si falla el borrado del archivo, lo que queda es un
+        # objeto huérfano, no una fila apuntando a algo que ya no está.
+        transaction.on_commit(lambda: archivo.delete(save=False))
+        messages.success(request, f"Se quitó «{nombre}».")
+        return redirect("web:entrega_detalle", pk=entrega.pk)
+
+
+class DescargaDocumentoView(ModuloProyectosRequeridoMixin, View):
+    """Descarga un documento de una entrega con su nombre legible.
+
+    Pasa por el servidor para comprobar que la entrega es visible para quien
+    descarga, y para que el archivo baje con el nombre que le puso el usuario en
+    vez de la clave con que quedó guardado.
+    """
+
+    def get(self, request, pk):
+        documento = get_object_or_404(
+            Documentos.objects.select_related("actividad_entrega__actividad"), pk=pk
+        )
+        get_object_or_404(
+            selectors.entregas_visibles(request.user),
+            pk=documento.actividad_entrega_id,
+        )
+        extension = (documento.archivo.name or "").rsplit(".", 1)
+        nombre = documento.nombre
+        if len(extension) == 2:
+            nombre = f"{nombre}.{extension[1]}"
+        try:
+            return redirect(url_de_descarga(documento.archivo, nombre))
+        except ValidationError as exc:
+            messages.error(request, "; ".join(exc.messages))
+            return redirect("web:entrega_detalle", pk=documento.actividad_entrega_id)
+
+
+class RevisionCreateView(ModuloProyectosRequeridoMixin, View):
     """Aprueba o solicita ajustes sobre una entrega. Quién revisa lo decide
     ``selectors.responsable_revision`` (coordinador del proyecto para el trabajo
     de un formulador; director del proyecto para el de un coordinador)."""
@@ -531,7 +690,7 @@ class RevisionCreateView(LoginRequiredMixin, View):
 # =========================================================================== #
 # Reportes
 # =========================================================================== #
-class ReportesIndexView(LoginRequiredMixin, TemplateView):
+class ReportesIndexView(ModuloProyectosRequeridoMixin, TemplateView):
     """Página de Reportes con los formularios de filtros."""
 
     template_name = "web/reportes/index.html"
@@ -544,11 +703,37 @@ class ReportesIndexView(LoginRequiredMixin, TemplateView):
         return ctx
 
 
-@login_required
+def _filtros_validos(form, request):
+    """Filtros limpios del formulario, o None si el usuario envió algo inválido.
+
+    Un filtro mal formado (una fecha que no es fecha, un proyecto que no existe)
+    se descartaba en silencio y salía el reporte COMPLETO, que es justo lo que no
+    se pidió y encima pasa desapercibido. Mejor devolver a la página de reportes
+    con el motivo.
+    """
+    if not request.GET:
+        return {}  # sin filtros: el reporte completo es lo que se espera
+    if form.is_valid():
+        return form.cleaned_data
+    errores = "; ".join(
+        f"{form.fields[campo].label or campo}: {' '.join(msgs)}"
+        for campo, msgs in form.errors.items()
+        if campo in form.fields
+    )
+    messages.error(
+        request,
+        f"No se generó el reporte porque hay filtros inválidos. {errores}".strip(),
+    )
+    return None
+
+
+@rol_requerido(*ROLES_MODULO)
 def reporte_formulados_excel(request):
     """Genera bajo demanda el .xlsx de Proyectos Formulados."""
     form = ReporteFormuladosForm(request.user, request.GET or None)
-    f = form.cleaned_data if form.is_valid() else {}
+    f = _filtros_validos(form, request)
+    if f is None:
+        return redirect("web:reportes")
     filas = report_queries.proyectos_formulados(
         request.user,
         proyecto=f.get("proyecto"), responsable=f.get("responsable"),
@@ -569,11 +754,13 @@ def reporte_formulados_excel(request):
     return resp
 
 
-@login_required
+@rol_requerido(*ROLES_MODULO)
 def reporte_avance_pdf(request):
     """Genera bajo demanda el PDF de Avance por Proyecto."""
     form = ReporteAvanceForm(request.user, request.GET or None)
-    f = form.cleaned_data if form.is_valid() else {}
+    f = _filtros_validos(form, request)
+    if f is None:
+        return redirect("web:reportes")
     data = report_queries.avance_por_proyecto(
         request.user,
         proyecto=f.get("proyecto"), responsable=f.get("responsable"),
