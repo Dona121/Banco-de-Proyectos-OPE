@@ -10,6 +10,7 @@ from contenido.models import Actividades, ActividadEntrega
 from cuentas.roles import COORDINADOR
 
 from . import selectors
+from .selectors import ESTADOS_SIN_PLAZO  # noqa: F401  (se reexporta)
 
 Estado = Actividades.EstadoActividad
 
@@ -75,7 +76,6 @@ def _pendientes_revision(entregas, ahora):
 # Entregar detiene el reloj: una actividad En revisión no está vencida ni por
 # vencer, aunque su fecha haya pasado. Misma regla que el filtro `vencida` de
 # `web_extras`; si cambia una, cambia la otra.
-ESTADOS_SIN_PLAZO = (Estado.EN_REVISION, Estado.APROBADA)
 
 
 def _tiempo_medio_de_respuesta(revisiones, revisor):

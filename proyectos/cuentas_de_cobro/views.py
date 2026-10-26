@@ -61,6 +61,22 @@ class BandejaView(ModuloRequeridoMixin, ListView):
     context_object_name = "cuentas"
     paginate_by = 15
 
+    def _numero_de(self, nombre, admitidos=None):
+        """Un parámetro numérico de la querystring, o "" si no sirve.
+
+        Los tres filtros por id salen de la URL, y filtrar por algo que no es un
+        número hace que el ORM lance `ValueError` y la página responda **500**:
+        se descarta antes de llegar al queryset. `admitidos` acota además el
+        conjunto, que es lo que hace falta para el mes: solo hay doce, y pedir el
+        13 debe ser "sin filtro", no una lista vacía sin explicación.
+        """
+        valor = self.request.GET.get(nombre, "").strip()
+        if not valor.isdigit():
+            return ""
+        if admitidos is not None and int(valor) not in admitidos:
+            return ""
+        return valor
+
     def get_queryset(self):
         qs = (
             selectors.cuentas_visibles(self.request.user)
@@ -69,14 +85,16 @@ class BandejaView(ModuloRequeridoMixin, ListView):
             .prefetch_related(*services.RELACIONES_DEL_FLUJO)
             .order_by("-fecha_creacion")
         )
-        self.f_contratista = self.request.GET.get("contratista", "").strip()
+        self.f_contratista = self._numero_de("contratista")
+        self.f_vigencia = self._numero_de("vigencia")
+        self.f_mes = self._numero_de("mes", admitidos=CuentaEntrega.Meses.values)
         self.f_estado = self.request.GET.get("estado", "").strip()
-        # El id llega de la querystring: si no es un número, filtrar por él hace
-        # que el ORM lance ValueError y la página responda 500.
-        if not self.f_contratista.isdigit():
-            self.f_contratista = ""
         if self.f_contratista:
             qs = qs.filter(usuario_id=self.f_contratista)
+        if self.f_vigencia:
+            qs = qs.filter(vigencia_id=self.f_vigencia)
+        if self.f_mes:
+            qs = qs.filter(mes=self.f_mes)
         if self.f_estado == "cerrada":
             qs = qs.filter(fecha_cierre__isnull=False)
         elif self.f_estado == "sin_revisar":
@@ -101,8 +119,23 @@ class BandejaView(ModuloRequeridoMixin, ListView):
             visibles.values_list("usuario_id", "usuario__first_name", "usuario__username")
             .distinct().order_by("usuario__first_name")
         )
+        # Mismo criterio que con los contratistas: se ofrecen solo las vigencias
+        # y los meses que de verdad aparecen en las cuentas visibles, para que
+        # ninguna opción del desplegable devuelva una lista vacía.
+        ctx["vigencias"] = (
+            visibles.values_list("vigencia_id", "vigencia__vigencia")
+            .distinct().order_by("-vigencia__vigencia")
+        )
+        presentes = set(visibles.values_list("mes", flat=True).distinct())
+        ctx["meses"] = [
+            (valor, etiqueta)
+            for valor, etiqueta in CuentaEntrega.Meses.choices
+            if valor in presentes
+        ]
         ctx["estado_choices"] = CuentaEntrega.ResultadoRevision.choices
         ctx["f_contratista"] = self.f_contratista
+        ctx["f_vigencia"] = self.f_vigencia
+        ctx["f_mes"] = self.f_mes
         ctx["f_estado"] = self.f_estado
         return ctx
 

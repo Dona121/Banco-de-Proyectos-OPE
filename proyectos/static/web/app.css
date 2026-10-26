@@ -49,13 +49,20 @@ h1, h2, h3, h4, .font-head { font-family: "Montserrat", system-ui, sans-serif; l
 .rise-3 { animation-delay: .12s; } .rise-4 { animation-delay: .16s; }
 
 /* Badges ----------------------------------------------------------------- */
+/* Sin el punto que llevaban delante (era un `::before`): el color de fondo ya
+   distingue el estado y el punto solo repetía esa información.
+   Esquina de rectángulo redondeado, en la línea de la tarjeta, no de píldora.
+   No es el `1rem` de `.card` al pie de la letra a propósito: la insignia mide
+   unos 22 px de alto, así que 16 px de radio serían casi la mitad de su altura
+   y volvería a leerse ovalada. `.5rem` es lo que a este tamaño se ve cuadrado.
+   El padding queda parejo a los dos lados, que antes era asimétrico para dejar
+   sitio al punto. */
 .badge {
   display: inline-flex; align-items: center; gap: .4rem;
-  padding: .2rem .6rem .2rem .55rem;
+  padding: .22rem .55rem;
   font-size: .72rem; font-weight: 700; line-height: 1.35;
-  border-radius: 9999px; border: 1px solid transparent; white-space: nowrap;
+  border-radius: .5rem; border: 1px solid transparent; white-space: nowrap;
 }
-.badge::before { content: ""; width: .42rem; height: .42rem; border-radius: 9999px; background: currentColor; opacity: .85; }
 .badge-pendiente { background: #f1f5f9; color: #475569; border-color: #e2e8f0; }
 .badge-revision  { background: var(--azul-light); color: var(--azul); border-color: #c5dded; }
 .badge-ajustes   { background: var(--ambar-light); color: var(--ambar-dark); border-color: #ffe2ac; }

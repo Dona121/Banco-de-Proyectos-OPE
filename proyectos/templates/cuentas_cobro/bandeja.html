@@ -28,6 +28,29 @@
       {% endfor %}
     </select>
   </div>
+  {% comment %}Vigencia y mes: un desplegable solo se pinta si hay algo que filtrar, igual que en la lista de proyectos. Con una sola vigencia cargada, ofrecerla no ayuda a nadie.{% endcomment %}
+  {% if vigencias %}
+  <div class="min-w-44">
+    <label class="mb-1 block text-xs font-semibold text-slate-500">Vigencia</label>
+    <select name="vigencia" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 focus:outline-none">
+      <option value="">Todas</option>
+      {% for vid, anio in vigencias %}
+      <option value="{{ vid }}" {% if f_vigencia == vid|stringformat:'s' %}selected{% endif %}>{{ anio }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% endif %}
+  {% if meses %}
+  <div class="min-w-44">
+    <label class="mb-1 block text-xs font-semibold text-slate-500">Mes</label>
+    <select name="mes" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 focus:outline-none">
+      <option value="">Todos</option>
+      {% for valor, etiqueta in meses %}
+      <option value="{{ valor }}" {% if f_mes == valor|stringformat:'s' %}selected{% endif %}>{{ etiqueta }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% endif %}
   <div class="min-w-44">
     <label class="mb-1 block text-xs font-semibold text-slate-500">Estado de revisión</label>
     <select name="estado" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 focus:outline-none">

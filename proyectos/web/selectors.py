@@ -4,12 +4,23 @@ Centralizan la regla "un usuario nunca ve información que no le corresponda".
 Las vistas SIEMPRE deben partir de estas funciones, nunca de ``Model.objects``.
 """
 from django.contrib.auth import get_user_model
-from django.db.models import Count, F, OuterRef, Q, Subquery
+from django.db.models import Count, F, Max, OuterRef, Q, Subquery
+from django.utils import timezone
 
 from contenido.models import Actividades, ActividadEntrega, Proyectos, Revisiones
 from cuentas.roles import roles_de, CONSULTA, DIRECTOR, COORDINADOR, FORMULADOR
 
 User = get_user_model()
+
+# Estados en los que el plazo ya NO corre: entregar detiene el reloj. Vive aquí,
+# en la capa de abajo, porque lo necesita la anotación de vencidas y `metrics` lo
+# importa de aquí: así la lista de estados sigue teniendo un solo dueño. La misma
+# regla está además en el filtro `vencida` de `web_extras` y en las
+# notificaciones de `services`; los cuatro sitios cambian juntos.
+ESTADOS_SIN_PLAZO = (
+    Actividades.EstadoActividad.EN_REVISION,
+    Actividades.EstadoActividad.APROBADA,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -31,6 +42,58 @@ def proyectos_visibles(user):
     if FORMULADOR in grupos:
         return qs.filter(actividades__asignado_a=user).distinct()
     return qs.none()
+
+
+def con_seguimiento(qs):
+    """Añade a cada proyecto el resumen que pinta su tarjeta.
+
+    Sale de la pregunta real: con muchos proyectos, la tarjeta no decía nada
+    sobre el estado de sus actividades ni sobre si había movimiento, así que
+    hacer seguimiento obligaba a entrar en cada una.
+
+    Todo son anotaciones sobre la MISMA consulta: la lista no gana ni una
+    consulta más, que con doce tarjetas por página es lo que importa.
+
+    Dos cosas que no son evidentes y que costarían un bug cada una:
+
+    - **`distinct=True` en cada `Count` no es decoración.** La anotación de la
+      última entrega añade dos JOIN (entregas y revisiones) que multiplican las
+      filas de cada proyecto; sin `distinct`, los conteos saldrían inflados por
+      el número de entregas en vez de contar actividades.
+    - **"Enviada" es derivado, no un campo.** No hay columna que lo diga:
+      `entrega_enviada` lo calcula. Un `Max(fecha_actualizacion)` a secas
+      contaría los BORRADORES abiertos, y la tarjeta anunciaría una entrega que
+      nadie envió, con toda la apariencia de ser correcta. La condición de abajo
+      reproduce la del selector, y cierra gracias al invariante de que una
+      versión que no es la vigente siempre tiene revisión: dentro de una
+      actividad En revisión, la única sin revisar es la vigente.
+    """
+    Estado = Actividades.EstadoActividad
+    enviada = (
+        Q(actividades__actividadentrega__revisiones__isnull=False)
+        | Q(actividades__estado=Estado.EN_REVISION)
+    )
+
+    def por_estado(estado):
+        return Count(
+            "actividades", filter=Q(actividades__estado=estado), distinct=True
+        )
+
+    return qs.annotate(
+        n_pendiente=por_estado(Estado.PENDIENTE),
+        n_revision=por_estado(Estado.EN_REVISION),
+        n_ajustes=por_estado(Estado.AJUSTES),
+        n_aprobada=por_estado(Estado.APROBADA),
+        n_vencidas=Count(
+            "actividades",
+            filter=Q(actividades__fecha_vencimiento__lt=timezone.now())
+            & ~Q(actividades__estado__in=ESTADOS_SIN_PLAZO),
+            distinct=True,
+        ),
+        ultima_entrega=Max(
+            "actividades__actividadentrega__fecha_actualizacion", filter=enviada
+        ),
+    )
 
 
 def opciones_de_filtro(user):

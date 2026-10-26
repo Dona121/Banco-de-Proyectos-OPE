@@ -3,8 +3,10 @@ coordinador; el coordinador del proyecto revisa lo que ejecuta un formulador."""
 from datetime import timedelta
 
 from django.contrib.auth.models import Group, User
+from django.db import connection
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
@@ -1147,3 +1149,139 @@ class ActividadEditTest(ReglaBBaseTest):
         self.assertEqual(resp.status_code, 200)  # re-render con error de validación
         act.refresh_from_db()
         self.assertEqual(act.nombre, "orig")
+
+
+class TarjetaDeProyectoTest(ReglaBBaseTest):
+    """El resumen que la tarjeta de `/proyectos/` pinta por proyecto.
+
+    Antes la tarjeta solo decía cuántas actividades había en total y cuándo se
+    creó el proyecto, así que con muchos proyectos no se podía ver dónde había
+    movimiento ni qué estaba en curso sin entrar en cada uno.
+    """
+
+    def _tarjeta(self):
+        return selectors.con_seguimiento(
+            selectors.proyectos_visibles(self.director)
+        ).get(pk=self.proyecto.pk)
+
+    def test_un_borrador_abierto_no_cuenta_como_entrega(self):
+        """El fallo más fácil de cometer aquí, y el que mejor disimula.
+
+        No hay campo "entregada": si la anotación mirase sin más la fecha de
+        la entrega, abrir un borrador que nadie envió haría que la tarjeta
+        anunciara una entrega reciente.
+        """
+        self._borrador(self.form)
+        p = self._tarjeta()
+        self.assertIsNone(p.ultima_entrega, "un borrador se contó como entrega")
+        self.assertEqual(p.n_pendiente, 1)
+        self.assertEqual(p.n_revision, 0)
+
+    def test_realizar_la_entrega_si_cuenta(self):
+        act, entrega = self._entrega(self.form)
+        p = self._tarjeta()
+        self.assertIsNotNone(p.ultima_entrega)
+        self.assertEqual(p.n_revision, 1)
+        self.assertEqual(p.n_pendiente, 0)
+
+    def test_una_version_devuelta_sigue_contando_como_entrega(self):
+        """Tras una devolución la actividad vuelve a Pendiente, pero hubo envío."""
+        act, entrega = self._entrega(self.form)
+        services.registrar_revision(entrega, self.coord, Revisiones.ResultadoRevision.AJUSTES, "corrige")
+        act.refresh_from_db()
+        p = self._tarjeta()
+        self.assertEqual(p.n_ajustes, 1)
+        self.assertIsNotNone(
+            p.ultima_entrega, "la entrega ya revisada dejó de contar"
+        )
+
+    def test_los_conteos_no_se_inflan_con_varias_entregas(self):
+        """La anotación de la última entrega añade JOINs que multiplican filas.
+
+        Sin `distinct=True` en cada `Count`, los conteos saldrían multiplicados
+        por el número de entregas en vez de contar actividades. Este es el caso
+        que lo destapa: dos actividades y tres entregas entre ellas.
+        """
+        act1, e1 = self._entrega(self.form)
+        services.registrar_revision(e1, self.coord, Revisiones.ResultadoRevision.AJUSTES, "corrige")
+        act1.refresh_from_db()
+        e2 = services.crear_entrega(act1, self.form, "v2")
+        self._documento(e2)
+        services.realizar_entrega(e2, self.form)
+        self._entrega(self.coord2)
+
+        p = self._tarjeta()
+        self.assertEqual(p.n_actividades, 2)
+        self.assertEqual(p.n_revision, 2)
+        self.assertEqual(
+            p.n_pendiente + p.n_revision + p.n_ajustes + p.n_aprobada, 2,
+            "los conteos por estado no suman el total de actividades",
+        )
+
+    def test_entregar_detiene_el_reloj_tambien_en_la_tarjeta(self):
+        """La regla del plazo vale igual en la anotación de vencidas."""
+        ahora = timezone.now()
+        vencida = Actividades.objects.create(
+            proyecto=self.proyecto, nombre="ya pasó",
+            fecha_programada=ahora - timedelta(days=10),
+            fecha_vencimiento=ahora - timedelta(days=3), estado=Estado.PENDIENTE,
+            asignado_por=self.director, asignado_a=self.form,
+        )
+        self.assertEqual(self._tarjeta().n_vencidas, 1)
+
+        # Entregarla la saca del conteo, aunque la fecha siga pasada.
+        entrega = services.crear_entrega(vencida, self.form, "v1")
+        self._documento(entrega)
+        services.realizar_entrega(entrega, self.form)
+        self.assertEqual(
+            self._tarjeta().n_vencidas, 0,
+            "una actividad entregada se sigue contando como vencida",
+        )
+
+    def test_un_proyecto_sin_actividades_queda_en_ceros(self):
+        p = self._tarjeta()
+        self.assertEqual(p.n_actividades, 0)
+        self.assertEqual(p.n_vencidas, 0)
+        self.assertIsNone(p.ultima_entrega)
+
+    def test_el_listado_no_gana_consultas_por_tarjeta(self):
+        """Todo son anotaciones: doce tarjetas no pueden costar doce consultas."""
+        for i in range(6):
+            otro = Proyectos.objects.create(
+                nombre=f"P{i}", creador_por=self.director, asignado_a=self.coord
+            )
+            act = Actividades.objects.create(
+                proyecto=otro, nombre="a", fecha_programada=timezone.now(),
+                fecha_vencimiento=timezone.now() + timedelta(days=2),
+                estado=Estado.PENDIENTE, asignado_por=self.director,
+                asignado_a=self.form,
+            )
+            e = services.crear_entrega(act, self.form, "v1")
+            self._documento(e)
+            services.realizar_entrega(e, self.form)
+
+        self.client.force_login(self.director)
+        with CaptureQueriesContext(connection) as capturadas:
+            r = self.client.get(reverse("web:proyectos"))
+        self.assertEqual(r.status_code, 200)
+        # Siete proyectos. El tope es holgado a propósito (sesión, usuario,
+        # permisos, el conteo del paginador, los desplegables de filtro): lo que
+        # tiene que saltar es una consulta POR TARJETA, no un cambio de dos.
+        self.assertLess(
+            len(capturadas), 25,
+            f"el listado hizo {len(capturadas)} consultas para siete proyectos",
+        )
+
+    def test_la_tarjeta_muestra_el_resumen(self):
+        act, entrega = self._entrega(self.form)
+        self.client.force_login(self.director)
+        html = self.client.get(reverse("web:proyectos")).content.decode()
+        self.assertIn("En revisión", html)
+        self.assertIn("Última entrega", html)
+        self.assertNotIn("Sin actividades aún", html)
+
+    def test_la_tarjeta_avisa_cuando_no_hay_nada(self):
+        self.client.force_login(self.director)
+        html = self.client.get(reverse("web:proyectos")).content.decode()
+        self.assertIn("Sin actividades aún", html)
+        self.assertIn("Sin entregas", html)

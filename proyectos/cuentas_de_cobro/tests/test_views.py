@@ -143,3 +143,106 @@ class VistasTest(TestCase):
         firmar = reverse("cuentas_cobro:subida_firmar", args=[self.cuenta.pk, "entrega"])
         self.assertNotIn(firmar, cuerpo)
         self.assertIn("Cargaste todos los documentos obligatorios", cuerpo)
+
+
+class FiltrosDeLaBandejaTest(TestCase):
+    """Los filtros de vigencia y mes, y lo que pasa si llegan mal por la URL."""
+
+    def setUp(self):
+        self.contratista = User.objects.create_user("contra", password="x")
+        self.otro = User.objects.create_user("contra2", password="x")
+        grupo = Group.objects.get(name="Contratista")
+        self.contratista.groups.add(grupo)
+        self.otro.groups.add(grupo)
+        # `Consulta` ve todas las cuentas por diseño. El supervisor NO sirve aquí:
+        # `cuentas_visibles` le exige haber participado o que la cuenta esté
+        # entregada, y estas están recién creadas, así que no vería ninguna y la
+        # prueba mediría el alcance en vez del filtro.
+        self.consulta = User.objects.create_user("consulta", password="x")
+        self.consulta.groups.add(Group.objects.get(name="Consulta"))
+
+        self.v2025 = Vigencia.objects.create(vigencia=2025)
+        self.v2026 = Vigencia.objects.create(vigencia=2026)
+        tipo = TipoDocumentoCargue.objects.create(nombre="Cuenta de cobro")
+        for v in (self.v2025, self.v2026):
+            RequisitoDocumental.objects.create(vigencia=v, tipo_documento=tipo)
+
+        # Tres cuentas: dos vigencias y dos meses distintos.
+        self.c_2025_marzo = services.crear_cuenta(self.contratista, self.v2025, 3, "marzo")
+        self.c_2026_marzo = services.crear_cuenta(self.contratista, self.v2026, 3, "marzo")
+        self.c_2026_julio = services.crear_cuenta(self.contratista, self.v2026, 7, "julio")
+
+    def _filas(self, **params):
+        self.client.force_login(self.consulta)
+        r = self.client.get(reverse("cuentas_cobro:bandeja"), params)
+        self.assertEqual(r.status_code, 200)
+        return {c.pk for c in r.context["cuentas"]}
+
+    def test_sin_filtros_salen_todas(self):
+        self.assertEqual(
+            self._filas(),
+            {self.c_2025_marzo.pk, self.c_2026_marzo.pk, self.c_2026_julio.pk},
+        )
+
+    def test_filtra_por_vigencia(self):
+        self.assertEqual(
+            self._filas(vigencia=self.v2026.pk),
+            {self.c_2026_marzo.pk, self.c_2026_julio.pk},
+        )
+
+    def test_filtra_por_mes(self):
+        self.assertEqual(
+            self._filas(mes=3), {self.c_2025_marzo.pk, self.c_2026_marzo.pk}
+        )
+
+    def test_los_dos_juntos_se_cruzan(self):
+        self.assertEqual(
+            self._filas(vigencia=self.v2026.pk, mes=3), {self.c_2026_marzo.pk}
+        )
+
+    def test_un_parametro_que_no_es_numero_no_revienta(self):
+        """Filtrar por algo que no es un id hace que el ORM lance ValueError.
+
+        Es la vía directa a un 500 desde la barra de direcciones, y ya estaba
+        cerrada para el contratista: los filtros nuevos usan la misma guarda.
+        """
+        for params in ({"vigencia": "abc"}, {"mes": "x"}, {"contratista": "'; --"},
+                       {"vigencia": "1.5"}, {"mes": "-3"}):
+            with self.subTest(params=params):
+                # Un parámetro inservible se descarta: la bandeja sale completa.
+                self.assertEqual(len(self._filas(**params)), 3)
+
+    def test_un_mes_fuera_de_rango_no_deja_la_bandeja_vacia(self):
+        """Pedir el mes 13 es "sin filtro", no una lista vacía sin explicación."""
+        self.assertEqual(len(self._filas(mes=13)), 3)
+        self.assertEqual(len(self._filas(mes=0)), 3)
+
+    def test_solo_se_ofrecen_las_vigencias_y_meses_presentes(self):
+        """Ninguna opción del desplegable puede devolver una lista vacía."""
+        self.client.force_login(self.consulta)
+        r = self.client.get(reverse("cuentas_cobro:bandeja"))
+        self.assertEqual(
+            [anio for _, anio in r.context["vigencias"]], [2026, 2025]
+        )
+        self.assertEqual(
+            [etiqueta for _, etiqueta in r.context["meses"]], ["Marzo", "Julio"]
+        )
+
+    def test_el_contratista_solo_ve_opciones_de_lo_suyo(self):
+        """El alcance manda: las opciones salen de las cuentas visibles."""
+        services.crear_cuenta(self.otro, self.v2026, 11, "noviembre")
+        self.client.force_login(self.contratista)
+        r = self.client.get(reverse("cuentas_cobro:bandeja"))
+        self.assertNotIn(
+            "Noviembre", [etiqueta for _, etiqueta in r.context["meses"]],
+            "se ofreció un mes que solo existe en la cuenta de otro contratista",
+        )
+
+    def test_el_filtro_elegido_queda_marcado_en_el_formulario(self):
+        self.client.force_login(self.consulta)
+        r = self.client.get(
+            reverse("cuentas_cobro:bandeja"), {"vigencia": self.v2026.pk, "mes": 7}
+        )
+        html = r.content.decode()
+        self.assertIn(f'value="{self.v2026.pk}" selected', html)
+        self.assertIn('value="7" selected', html)

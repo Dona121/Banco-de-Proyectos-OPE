@@ -147,7 +147,9 @@ class ProyectoListView(ModuloProyectosRequeridoMixin, ListView):
             qs = qs.filter(nombre__icontains=q)
         # `distinct` por el filtro de formulador, que entra por las actividades y
         # repetiría el proyecto una vez por actividad suya.
-        return qs.distinct().order_by("-fecha_creacion")
+        # El orden se deja por fecha de creación a propósito: el resumen de la
+        # tarjeta dice si hubo movimiento, pero no reordena la lista.
+        return selectors.con_seguimiento(qs).distinct().order_by("-fecha_creacion")
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
