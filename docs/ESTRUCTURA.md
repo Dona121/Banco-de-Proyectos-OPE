@@ -97,6 +97,7 @@ Modelos (en `contenido/models.py`, **no modificar**):
 | `urls.py` | `cuentas:login`, `cuentas:logout`, `cuentas:perfil`, `cuentas:cambiar_password` (`perfil/contrasena/`). |
 | `models.py` · `admin.py` | `ExtensionArchivo`: las extensiones admitidas al subir archivos, **administrables desde el panel** en vez de escritas en el código. Se siembran en una migración de datos con las 12 de siempre; si la tabla queda vacía, el validador cae a un conjunto de respaldo para no dejar la plataforma sin subidas. |
 | `validadores.py` | Lee de ahí las extensiones activas (con caché de proceso), tope de tamaño (1 GB, el del bucket) y `nombre_seguro()`, que translitera el nombre del archivo (tildes y eñes fuera) antes de que llegue al bucket. `ArchivoValidadoMixin` lo aplica en los formularios con `FileField`. |
+| `formularios.py` | Guardas de formulario para lo que los modelos definitivos no pueden llevar. `ModeloValidadoTrasElFormularioMixin` **salta la validación del modelo mientras el formulario tenga errores de campo**: Django llama al `clean()` del modelo aunque ya haya errores, y un `clean()` que da por supuesto un campo (las dos fechas de `Actividades`, la clave ajena de `ActividadEntrega` y `Revisiones`) reventaba con un 500 al pulsar Guardar. `ModeloValidadoAdminMixin` / `...InlineMixin` lo llevan a los formularios que el admin genera solo. |
 | `subidas.py` | **Transporte de archivos compartido por los dos dominios**: firma la URL de subida (`firmar_subida`), arma la clave del objeto (`clave_de_objeto`), verifica con `head_object` lo que el navegador dice haber subido (`confirmar_subida`) y firma las descargas con nombre legible (`url_de_descarga`). |
 | `apps.py` | Invalida por `m2m_changed` la caché de grupos de `roles_de`, para que cambiar los roles de un usuario no deje permisos obsoletos. |
 
@@ -247,6 +248,14 @@ python manage.py runserver
 # al bucket de producción.
 python manage.py test --settings=proyectos.test_settings
 ```
+
+**Dónde vive cada suite** (403 pruebas):
+
+| Módulo | Qué ataca |
+|---|---|
+| `web/tests.py` · `cuentas_de_cobro/tests/` | El camino bueno, por la vía de la vista. |
+| `web/test_invariantes.py` · `cuentas_de_cobro/tests/test_invariantes.py` | Las reglas **saltándose la vista**: llaman al servicio y al modelo como lo harían el admin, un comando o dos peticiones simultáneas. Una regla que solo vive en la vista no es una regla, y aquí se nota. |
+| `web/test_acceso.py` | El **barrido adversarial de los dos dominios**: las 44 rutas de acción con ids reales (50 entradas: los cuatro destinos de subida comparten vista y cada uno tiene su permiso), disparadas contra los once roles, un anónimo y un superusuario, exigiendo que nada responda 5xx. Más aislamiento entre dominios, `Consulta` sin ejecutar nada, dobles clics en las diez transiciones, ids basura (0, 2^31, texto, el id de otra cuenta), sesiones mal cerradas y CSRF. Una prueba de cobertura compara la matriz con las `urlpatterns`: **una ruta nueva que no se añada hace fallar la suite**. |
 
 > Con `uv`: `uv sync` y luego `uv run python proyectos/manage.py <comando>` (ver `README.md`).
 > Los comandos se corren **desde `proyectos/`**: `load_dotenv()` busca el `.env` a partir del directorio actual.

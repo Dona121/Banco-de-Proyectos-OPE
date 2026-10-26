@@ -850,6 +850,78 @@ de ese paso.
 
 **Suite: 340 pruebas** (eran 304).
 
+### Revisión de producción y barrido adversarial del 2026-10-26
+
+Pedido: comprobar si los cambios del 25 afectan a los datos que ya están en
+producción, y si rompieron algo del flujo que funcionaba. Se pidió ser estricto
+con las pruebas: romper el CRUD, dobles clics, sesiones mal iniciadas, enlaces
+abiertos a mano por roles que no deberían entrar.
+
+**Producción, comprobado sobre una copia.** Las migraciones nuevas no tocan nada
+existente, y los `CHECK` del 7 de octubre ya estaban aplicados allí, así que ya
+habían pasado por los datos reales.
+
+| Comprobación | Resultado |
+|---|---|
+| Las 79 actividades y las 13 cuentas contra `full_clean()` | 0 fallan; ninguna viola un `CHECK` |
+| La copia completa (1012 filas) en una base con **todas** las migraciones | Entra limpia |
+| 171 páginas x 70 usuarios activos con rol | **11.970 peticiones, 0 respuestas 5xx** |
+| Lo que el despliegue aplica de verdad | Solo `cuentas/0003_adjuntoderevision`: una tabla nueva. `makemigrations --check`: sin deriva |
+
+La copia se serializó a mano con `django.core.serializers` y `list(qs)`, porque
+`dumpdata` falla sobre el pooler de Supabase con "cursor does not exist".
+
+**Tres fallos reales, los tres con 500 a la vista.**
+
+1. **El formulario de actividad en blanco reventaba.** `Actividades.clean()`
+   compara las dos fechas sin comprobar que existan. La trampa está en que
+   Django llama al `clean()` del modelo desde `_post_clean()` **aunque el
+   formulario ya tenga errores de campo**: el `exclude` solo salta la validación
+   *de campo* de los campos con error, y `clean()` corre igual leyendo los
+   atributos, que siguen en `None`. Resultado: `TypeError`, no
+   `ValidationError`, y Django no lo atrapa. Alcanzable sin trampa ninguna:
+   abrir "Nueva actividad" y pulsar Guardar.
+2. **Lo mismo en el admin de entregas y de revisiones**, por otra puerta.
+   `ActividadEntrega.clean()` lee `self.actividad.estado` y `Revisiones.clean()`
+   lee `self.actividad_entrega.actividad.estado`: una clave ajena obligatoria sin
+   asignar no devuelve `None`, lanza `RelatedObjectDoesNotExist`.
+3. **El supervisor podía decidir dos veces.** Ver el detalle en
+   `ModuloCuentasCobro.md` §4.4. Lo grave no era el doble clic sino poder
+   rechazar después una cuenta con el cierre ya cargado y un trámite respondido.
+
+Los dos primeros se arreglan en `cuentas/formularios.py`, porque los dos
+`models.py` son definitivos: la validación del modelo se salta mientras el
+formulario tenga errores propios. **No apaga la validación**: con las dos fechas
+puestas no hay errores de campo, `clean()` corre y la coherencia de fechas sigue
+saltando (tiene prueba dedicada), y por debajo la señal `pre_save` sigue llamando
+a `full_clean()` en cada escritura del ORM. El admin se arma sus formularios solo,
+así que lleva dos mixins envolventes, el mismo patrón que ya existía para validar
+archivos, y una prueba recorre `admin.site._registry` para que no se reabra en
+silencio.
+
+**Un cuarto, menor.** Abrir sin sesión "Nueva actividad" o "Nueva entrega"
+devolvía **404** en vez de llevar al login: las dos vistas resolvían el objeto en
+`dispatch` **antes** de `super().dispatch()`, que es donde vive
+`LoginRequiredMixin`, y para un anónimo los selectores no devuelven nada. No se
+ejecutaba ni se filtraba nada; el mensaje era el equivocado.
+
+**Lo que sí aguantó**, en `web/test_acceso.py`: aislamiento entre dominios en los
+dos sentidos, `Consulta` sin ejecutar nada, dobles clics en las diez transiciones,
+ids basura (0, 2^31, texto, el id de un documento de **otra** cuenta, un soporte
+de otra entrega), sesiones mal cerradas (POST tras cerrar sesión, cambio de
+usuario en el mismo navegador, usuario desactivado, rol retirado a mitad de
+sesión) y CSRF en todos los POST.
+
+**Honestidad sobre el alcance.** De los dos caminos del fallo 3, lo que se
+reprodujo con una prueba es que el servicio **aceptaba la segunda llamada** y
+sobreescribía estado y fecha. El escenario completo de la cuenta trabada es el
+razonamiento de por qué importaba, no algo ejecutado de punta a punta. Y sigue en
+pie lo de siempre: `select_for_update` no hace nada en SQLite, así que la
+concurrencia está razonada y no probada; el doble clic sí está cubierto, por la
+vía de dos peticiones seguidas.
+
+Suite: de 354 a **403 pruebas**, todas en verde.
+
 ### Regla de negocio corregida (reportada por el usuario al probar la app)
 
 La validación de "una cuenta por vigencia y mes" solo miraba si la cuenta

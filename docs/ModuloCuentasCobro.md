@@ -307,6 +307,23 @@ forma **automática** cuando corresponde:
      `None`). La cuenta queda rechazada; NO reabre el flujo automáticamente.
 3. **El comentario es obligatorio en el rechazo**: el modelo NO lo exige, así que
    **imponlo en el formulario y/o servicio**. Registra `EventoTrazabilidad(etapa=SUP)`.
+4. **Se decide UNA sola vez, y la guarda es del servicio.**
+   `revisar_supervisor` escribe estado y fecha sin comprobar si ya había decisión,
+   así que `decidir_supervisor` rechaza la segunda llamada. Sin eso había dos
+   caminos: un doble clic movía `fecha_aprobacion_supervisor` al segundo clic y
+   duplicaba el asiento de la bitácora; y un POST posterior con `RE` (pestaña
+   vieja, botón atrás, URL a mano) daba por **rechazada una cuenta que ya tenía los
+   documentos de cierre cargados y un trámite respondido**. Como media docena de
+   selectores deciden qué se puede hacer leyendo `estado_supervisor == AP`, la
+   etapa de cierre desaparecía de la pantalla y la cuenta quedaba trabada: no
+   continúa (no está aprobada) y tampoco es una devolución, así que nadie la
+   reinicia. Este es el punto donde el expediente se firma: **no se reabre desde
+   la aplicación**, se corrige por el admin.
+
+   > Encontrado el 2026-10-26 por el barrido de `web/test_acceso.py`. La guarda va
+   > en el servicio y no en la vista porque la vista solo comprobaba el rol: la
+   > visibilidad del formulario la decidía la plantilla, y esconder un formulario
+   > nunca ha impedido un POST.
 
 ### 5. Cargue de documentos de cierre firmados (por el rol de radicación)
 1. Con `estado_supervisor == AP`, **el rol de radicación** carga los

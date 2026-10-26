@@ -53,7 +53,9 @@ equivocado.
 
 #### Lo que el barrido sí aguantó
 
-`web/test_acceso.py` ataca las **46 rutas de acción** de los dos dominios:
+`web/test_acceso.py` ataca las **44 rutas de acción** de los dos dominios, en
+50 entradas (los cuatro destinos de subida comparten vista, pero cada uno tiene
+su propio permiso, así que los cuatro entran):
 
 - **Once roles contra todas las rutas**, ejecutando de verdad, de modo que unas
   van cambiando el estado bajo las siguientes.

@@ -272,8 +272,14 @@ final.
    - **Aprobado** → da el visto bueno para firmar los documentos de cierre.
    - **Rechazado** → la cuenta no continúa (fin).
 
+   ⚠️ **Esta decisión se toma una sola vez.** Una vez enviada, el formulario
+   desaparece y no se puede cambiar, ni aprobar lo rechazado ni rechazar lo
+   aprobado. Es el momento en que el expediente queda firmado: si después se
+   pudiera cambiar, una cuenta con los documentos de cierre ya cargados podría
+   quedarse sin salida. Un error aquí se corrige por el panel de administración.
+
 **Qué se activa cuando actúa:**
-- Al **nombrar a los revisores**, empieza la revisión en orden (primero el jurídico).
+- Al **nombrar a los revisores**, empieza la revisión en orden (primero el **técnico**).
 - Al **aprobar** la decisión final, queda registrada la fecha de aprobación y le
   toca a **Radicación** cargar los documentos de cierre firmados.
 - Al **rechazar**, la cuenta se cierra sin continuar.
