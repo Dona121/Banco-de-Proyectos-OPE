@@ -258,7 +258,7 @@ python manage.py test --settings=proyectos.test_settings
 | `web/test_acceso.py` | El **barrido adversarial de los dos dominios**: las 44 rutas de acción con ids reales (50 entradas: los cuatro destinos de subida comparten vista y cada uno tiene su permiso), disparadas contra los once roles, un anónimo y un superusuario, exigiendo que nada responda 5xx. Más aislamiento entre dominios, `Consulta` sin ejecutar nada, dobles clics en las diez transiciones, ids basura (0, 2^31, texto, el id de otra cuenta), sesiones mal cerradas y CSRF. Una prueba de cobertura compara la matriz con las `urlpatterns`: **una ruta nueva que no se añada hace fallar la suite**. |
 
 > Con `uv`: `uv sync` y luego `uv run python proyectos/manage.py <comando>` (ver `README.md`).
-> Los comandos se corren **desde `proyectos/`**: `load_dotenv()` busca el `.env` a partir del directorio actual.
+> Los comandos se corren **desde `proyectos/`** por comodidad (es donde está `manage.py`), no por el `.env`: `find_dotenv()` sube desde el fichero que lo llama (`proyectos/proyectos/settings.py`), así que `proyectos/.env` se encuentra desde cualquier directorio.
 
 - App web: `/`  ·  Cuentas de cobro: `/cuentas-cobro/`  ·  Admin técnico: `/admin/`
 - Asignar a cada usuario su grupo y marcar `is_staff` para acceso al admin:

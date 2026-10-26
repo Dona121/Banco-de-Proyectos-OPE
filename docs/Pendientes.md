@@ -1000,8 +1000,14 @@ para cómo se midieron y qué se cambió.
   (`:6543`) cuelga operaciones largas como `dumpdata`.
 - Un proyecto de Supabase **pausado** se reconoce porque el endpoint de storage
   devuelve **HTTP 540** y el pooler responde `tenant/user not found`.
-- `load_dotenv()` se llama sin ruta: buscar desde el directorio actual. Los
-  comandos hay que correrlos desde `proyectos/`, no desde la raíz del repositorio.
+- `load_dotenv()` se llama sin ruta, y `find_dotenv()` sube desde **el fichero
+  que lo llama** (`proyectos/proyectos/settings.py`), **no** desde el directorio
+  actual: `proyectos/.env` se encuentra desde cualquier sitio. Comprobado el
+  2026-10-26 ocultando el fichero: sin él, `manage.py check` desde `C:/` falla con
+  `ImproperlyConfigured: Falta SECRET_KEY`; con él, pasa. **Aquí decía lo
+  contrario**, que había que correr los comandos desde `proyectos/` para que se
+  leyera el `.env`. Correrlos desde ahí es cómodo, pero si falta una variable el
+  directorio actual no es la causa, y buscar por ahí hace perder el tiempo.
 - Borrar una `CuentaEntrega` por el ORM falla (`RevisionCuentaCobro.asignacion`
   es `PROTECT`); usar `TRUNCATE cuentas_de_cobro_cuentaentrega CASCADE`.
 
