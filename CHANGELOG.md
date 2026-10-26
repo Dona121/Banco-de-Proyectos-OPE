@@ -20,7 +20,7 @@ subido es `4fdbc8a` (2026-10-07).
 ### 2026-10-26
 
 Revisión de seguridad de los cambios de ayer frente a los datos de producción, y
-barrido adversarial del flujo completo. Suite: de 354 a 403 pruebas.
+barrido adversarial del flujo completo. Suite: de 347 a 403 pruebas.
 
 #### Producción no se ve afectada
 

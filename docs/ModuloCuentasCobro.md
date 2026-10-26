@@ -579,6 +579,11 @@ sola los dos tipos de devolución (de revisor y de radicación) sin casos especi
   dos), y los dos estados se derivan en `services.cuenta_rechazada` /
   `services.cuenta_aprobada`. No se puede imponer con una restricción de base de
   datos porque `models.py` es definitivo.
+- **La decisión del supervisor se toma una sola vez.** `revisar_supervisor`
+  sobreescribe estado y fecha sin comprobar si ya había decisión, así que la
+  guarda está en `services.decidir_supervisor`. Sin ella, un POST posterior con
+  `RE` daba por rechazada una cuenta con el cierre ya cargado y un trámite
+  respondido, y la cuenta quedaba sin salida. Detalle en §4.4.
 - **El paquete entregado no se modifica.** Pulsar "Entregar" lo congela: ni
   adjuntar ni quitar. Mientras no se comprobaba, un POST directo colaba un
   documento en una versión ya en revisión; entraba en `PENDIENTE` y dejaba al
