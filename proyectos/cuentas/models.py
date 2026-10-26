@@ -4,6 +4,9 @@ Vive en `cuentas` y no en `contenido` ni en `cuentas_de_cobro` porque esos dos
 conjuntos de modelos son definitivos y no se tocan, y porque el validador que lo
 usa (`cuentas/validadores.py`) ya está aquí y lo comparten los dos dominios.
 """
+from django.contrib.auth.models import User
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import models
 
@@ -65,3 +68,57 @@ class ExtensionArchivo(models.Model):
     def save(self, *args, **kwargs):
         self.full_clean()
         super().save(*args, **kwargs)
+
+
+class AdjuntoDeRevision(models.Model):
+    """Documento que adjunta quien revisa, en cualquiera de los dos dominios.
+
+    Quien revisa no tenía dónde dejar un soporte de lo que observa: solo podía
+    escribir un comentario. Esto le permite acompañarlo con un archivo (una
+    captura, una norma, un formato corregido), y es **opcional**: el formulario
+    de revisión no lo exige.
+
+    **Cuelga del objeto revisado, no de la revisión**, y esa es la decisión que
+    hace que funcione: cuando el revisor está escribiendo el formulario la
+    revisión todavía no existe, así que no habría a qué atar el archivo. Atado a
+    la versión (`DocumentoEntrega`) o a la entrega (`ActividadEntrega`) más el
+    usuario, el adjunto se puede subir antes de registrar la revisión, que es
+    justo como se usa.
+
+    Vive en `cuentas` porque los `models.py` de los dos dominios son
+    definitivos, y porque así un solo modelo sirve a los dos.
+    """
+
+    content_type = models.ForeignKey(
+        ContentType, on_delete=models.CASCADE, verbose_name="Tipo de objeto"
+    )
+    object_id = models.PositiveIntegerField(verbose_name="Id del objeto")
+    revisado = GenericForeignKey("content_type", "object_id")
+
+    usuario = models.ForeignKey(
+        User, on_delete=models.CASCADE, verbose_name="Quien lo adjuntó",
+        related_name="adjuntos_de_revision",
+    )
+    nombre = models.CharField(max_length=250, verbose_name="Nombre del documento")
+    archivo = models.FileField(
+        verbose_name="Archivo", upload_to="revisiones/%Y/%m/"
+    )
+    fecha_creacion = models.DateTimeField(auto_now_add=True)
+    fecha_actualizacion = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Adjunto de revisión"
+        verbose_name_plural = "Adjuntos de revisión"
+        ordering = ("fecha_creacion",)
+        indexes = [models.Index(fields=["content_type", "object_id"])]
+
+    def __str__(self):
+        return f"{self.nombre} ({self.usuario})"
+
+    @classmethod
+    def de(cls, objeto):
+        """Adjuntos de un objeto revisado, con su autor ya cargado."""
+        return cls.objects.filter(
+            content_type=ContentType.objects.get_for_model(objeto),
+            object_id=objeto.pk,
+        ).select_related("usuario")

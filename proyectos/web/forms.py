@@ -11,6 +11,7 @@ from contenido.models import (
     Subactividades,
 )
 from cuentas.roles import COORDINADOR, FORMULADOR, es_director
+from cuentas.formularios import ModeloValidadoTrasElFormularioMixin
 from cuentas.validadores import ArchivoValidadoMixin
 
 User = get_user_model()
@@ -63,7 +64,9 @@ class ProyectoForm(EstilizadoMixin, forms.ModelForm):
         self.fields["asignado_a"].queryset = _usuarios_de(COORDINADOR)
 
 
-class ActividadForm(EstilizadoMixin, forms.ModelForm):
+class ActividadForm(
+    ModeloValidadoTrasElFormularioMixin, EstilizadoMixin, forms.ModelForm
+):
     class Meta:
         model = Actividades
         fields = ("nombre", "fecha_programada", "fecha_vencimiento", "asignado_a")
@@ -89,7 +92,9 @@ class ActividadForm(EstilizadoMixin, forms.ModelForm):
             self.fields[nombre].input_formats = ["%Y-%m-%dT%H:%M"]
 
 
-class ActividadEditForm(EstilizadoMixin, forms.ModelForm):
+class ActividadEditForm(
+    ModeloValidadoTrasElFormularioMixin, EstilizadoMixin, forms.ModelForm
+):
     """Edición de una actividad ya creada: solo nombre y fechas.
 
     El ejecutor (`asignado_a`), el estado y la asignación no se tocan aquí para

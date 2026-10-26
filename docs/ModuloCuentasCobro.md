@@ -219,21 +219,65 @@ Cada acción restringida a su actor.
   estén `AP` en la última entrega, marcará `estado_revisores=AP` y
   `fecha_aprobacion_revisores`.
 
-**Reinicio TOTAL del ciclo (decisión definitiva del equipo):** ante cualquier
-devolución (`AJ`/`RE`) de cualquier rol, el flujo **reinicia completo desde el
-revisor técnico**. NO hay carry-forward: la nueva versión de `DocumentoEntrega`
-nace **vacía** y el contratista vuelve a entregar el **paquete completo** de
-documentos; los tres roles re-revisan desde cero. Esto cae naturalmente del modelo
-(las `RevisionCuentaCobro` cuelgan de `documento_entrega` y `actualizar_estado`
-solo mira la última versión), así que no copies ni arrastres revisiones ni
-documentos de versiones anteriores.
+**Reinicio del ciclo de revisión, con arrastre de documentos.** Ante cualquier
+devolución (`AJ`/`RE`) de cualquier rol, **las revisiones reinician completas
+desde el revisor técnico**: la versión nueva nace sin ninguna
+`RevisionCuentaCobro` y los tres roles vuelven a tener turno. Nadie firma una
+versión que no vio entera.
+
+**Los documentos sí se arrastran.** `nueva_version` copia a la versión siguiente
+los que estaban en `AP` o `NA`, con su estado y su comentario; los `RE` y los
+`PE` no se copian. El contratista solo vuelve a cargar **lo que le objetaron**,
+no el paquete completo.
+
+> **Esto cambió el 2026-10-25.** Antes la versión nacía vacía y había que
+> recargarlo todo, incluso lo que nadie había objetado. Si lees "reinicio TOTAL,
+> sin carry-forward" en algún sitio, está desactualizado: lo que no se arrastra
+> son las **revisiones**, no los documentos.
+
+Tres consecuencias que caen solas y conviene no re-implementar:
+`documentos_faltantes` pasa a devolver solo los rechazados; el desplegable de
+carga ofrece exactamente esos (sale del mismo queryset); y `puede_entregar`
+sigue exigiendo que no falte ninguno.
+
+Dos guardas que **no** caen solas y están puestas a mano:
+
+* **Un documento aprobado no se quita** (`puede_eliminar_documento`), ni los de
+  versiones anteriores. Si no, borrarlo sería la puerta de atrás para recargarlo
+  y el historial perdería la prueba de lo que se objetó.
+* **La copia reutiliza la clave del objeto en el bucket**, así que dos filas
+  apuntan al mismo archivo. `cuentas.borrado` cuenta referencias antes de
+  retirarlo: borrar una fila no puede dejar a la otra apuntando a la nada.
 
 **La versión nueva NO es revisable hasta que el contratista la reentregue.** El
 gating (`rol_habilitado`) exige que la última versión tenga su evento "enviada"
-(`entrega_enviada`): tras una devolución, la versión vacía queda a la espera del
-contratista y **ningún revisor** puede actuar sobre ella (ni ver el formulario de
-revisión) hasta que recargue el paquete y pulse **"Entregar"**. Sin esto, el
-reinicio se saltaría y un revisor podría "aprobar" una versión vacía.
+(`entrega_enviada`): tras una devolución queda a la espera del contratista y
+**ningún revisor** puede actuar sobre ella (ni ver el formulario de revisión)
+hasta que recargue lo que falta y pulse **"Entregar"**. Vale aunque casi todos
+los documentos vengan ya aprobados.
+
+**Historial de versiones (solo lectura).** El detalle muestra las versiones
+anteriores con sus documentos (estado y causal) y sus revisiones
+(`selectors.historial_de_versiones`). Existe porque al devolver una cuenta el
+contratista veía el comentario general en la línea de tiempo pero **no la causal
+documento a documento**, que queda escrita en la versión anterior: se quedaba sin
+saber cuál era el documento malo ni por qué. No lleva acciones: solo abrir y
+descargar.
+
+**Soportes de la revisión.** Quien revisa puede adjuntar documentos junto a su
+comentario (`cuentas.models.AdjuntoDeRevision`), de forma **opcional**, apruebe o
+devuelva. Cuelgan de la **versión** y no de la revisión, que es lo que permite
+subirlos antes de registrarla. Los ve y descarga todo el que ve la cuenta,
+**incluido el contratista**: son observaciones dirigidas a él.
+
+El cargue y el retiro **se cierran al registrar la revisión de ese rol**: lo que
+respalda una decisión tomada no se toca, y dejar el cargue abierto después se
+leía como que la revisión no se había guardado. Un rol que todavía no ha
+revisado sigue pudiendo adjuntar: la regla es por rol, no por cuenta.
+
+La tarjeta del historial llega **plegada**, con un indicador que gira al abrir:
+una cuenta con varias devoluciones acumula versiones y desplegadas empujan el
+resto de la pantalla fuera de la vista.
 
 **Versionamiento del paquete:** se versiona el **paquete de entrega completo**
 (`DocumentoEntrega`), no documentos individuales. El archivo de las versiones

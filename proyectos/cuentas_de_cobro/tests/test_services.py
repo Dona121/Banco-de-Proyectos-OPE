@@ -103,10 +103,15 @@ class FlujoBaseTest(TestCase):
         )
 
     def _recargar_y_entregar(self, cuenta):
-        """El contratista recarga el paquete de la versión vigente y la entrega."""
+        """El contratista recarga lo que falta de la versión vigente y la entrega.
+
+        Desde que una devolución arrastra los documentos aprobados, lo que falta
+        son solo los rechazados: volver a cargarlo todo choca con la unicidad
+        por (versión, tipo), que es justo lo que el arrastre evita.
+        """
         entrega = services.ultima_entrega(cuenta)
-        services.adjuntar_documento(entrega, self.t1, _archivo())
-        services.adjuntar_documento(entrega, self.t2, _archivo())
+        for tipo in services.documentos_faltantes(cuenta):
+            services.adjuntar_documento(entrega, tipo, _archivo())
         services.entregar(cuenta, self.contratista)
 
 

@@ -104,6 +104,42 @@
     {% else %}
     <p class="text-sm text-slate-400">Esta entrega aún no tiene revisión.</p>
     {% endif %}
+
+    {% comment %}
+    Soportes de quien revisa: opcionales, para acompañar una observación con el
+    documento que la sustenta. Cuelgan de la entrega y no de la revisión, así que
+    se pueden subir antes de registrarla. Los ve quien entregó, que es el punto.
+    {% endcomment %}
+    {% if adjuntos_revision or puede_adjuntar_revision %}
+    <div class="mt-5 border-t border-slate-100 pt-4">
+      <p class="text-xs font-semibold text-slate-500">Soportes de la revisión</p>
+      <ul class="mt-2 space-y-2">
+        {% for item in adjuntos_revision %}
+        <li class="flex items-center gap-2 text-sm">
+          <span class="truncate text-slate-700">{{ item.adjunto.nombre }}</span>
+          <a href="{% url 'web:adjunto_revision_descargar' item.adjunto.pk %}"
+             class="text-slate-500 text-xs font-semibold hover:underline">Descargar</a>
+          {% if item.puede_quitar %}
+          {% url 'web:adjunto_revision_eliminar' item.adjunto.pk as u_quitar_adj %}
+          {% include 'components/eliminar_archivo.html' with accion=u_quitar_adj %}
+          {% endif %}
+          <span class="ml-auto shrink-0 text-xs text-slate-400">{{ item.adjunto.usuario.get_full_name|default:item.adjunto.usuario.username }}</span>
+        </li>
+        {% empty %}
+        <li class="text-xs text-slate-400">Todavía no hay soportes adjuntos.</li>
+        {% endfor %}
+      </ul>
+
+      {% if puede_adjuntar_revision %}
+      {% url 'web:adjunto_revision_firmar' entrega.pk as u_firmar_adj %}
+      {% url 'web:adjunto_revision_confirmar' entrega.pk as u_confirmar_adj %}
+      {% include 'components/subida_directa.html' with firmar_url=u_firmar_adj confirmar_url=u_confirmar_adj tipos=None con_nombre=1 boton="Adjuntar soporte" %}
+      <p class="mt-2 text-xs text-slate-400 leading-snug">
+        Opcional, apruebes o pidas ajustes. Podrás quitarlo mientras no registres la revisión.
+      </p>
+      {% endif %}
+    </div>
+    {% endif %}
   </div>
 </div>
 {% endblock %}

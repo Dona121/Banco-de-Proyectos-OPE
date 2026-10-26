@@ -34,9 +34,14 @@ from .mixins import (
     SupervisorRequeridoMixin,
     TramiteFinalRequeridoMixin,
 )
+from django.contrib.contenttypes.models import ContentType
+
+from cuentas.models import AdjuntoDeRevision
+
 from .models import (
     AsignacionRevisor,
     CuentaEntrega,
+    DocumentoEntrega,
     DocumentosCuentaCobro,
     RequisitoDocumental,
     TramiteFinal,
@@ -141,11 +146,19 @@ class CuentaDetailView(ModuloRequeridoMixin, DetailView):
     template_name = "cuentas_cobro/cuenta_detalle.html"
     context_object_name = "cuenta"
 
+    # El historial recorre los documentos y las revisiones de TODAS las versiones,
+    # cosa que la bandeja no hace. Estas precargas van solo aquí para no encarecer
+    # cada fila de la bandeja con datos que allí no se pintan.
+    RELACIONES_DEL_HISTORIAL = (
+        "documentoentrega_set__documentoscuentacobro_set__tipo_documento",
+        "documentoentrega_set__revisioncuentacobro_set__asignacion__revisor",
+    )
+
     def get_queryset(self):
         # El detalle pinta el flujograma completo, la línea de tiempo y el tablero
-        # de revisiones: las mismas relaciones que la bandeja.
+        # de revisiones: las mismas relaciones que la bandeja, más el historial.
         return selectors.cuentas_visibles(self.request.user).prefetch_related(
-            *services.RELACIONES_DEL_FLUJO
+            *services.RELACIONES_DEL_FLUJO, *self.RELACIONES_DEL_HISTORIAL
         )
 
     def get_context_data(self, **kwargs):
@@ -160,6 +173,12 @@ class CuentaDetailView(ModuloRequeridoMixin, DetailView):
                  .order_by("tipo_documento__nombre"))
             if entrega else []
         )
+        # Quitar se decide POR DOCUMENTO, no por cuenta: desde que la devolución
+        # arrastra los aprobados, en una misma tabla conviven los que se pueden
+        # quitar y los que no. Con una sola bandera, al contratista se le ofrecía
+        # el icono sobre un aprobado y recibía un 403 que no dice nada.
+        for d in documentos:
+            d.puede_eliminar = selectors.puede_eliminar_documento(user, d)
         ctx["documentos"] = documentos
         # Guía para el revisor: no se puede aprobar la revisión mientras haya
         # documentos en PENDIENTE (lo impone RevisionCuentaCobro.clean).
@@ -167,6 +186,26 @@ class CuentaDetailView(ModuloRequeridoMixin, DetailView):
             d.estado == DocumentosCuentaCobro.EstadoDocumento.PENDIENTE for d in documentos
         )
         ctx["entregas"] = cuenta.documentoentrega_set.order_by("-numero_version")
+        # Versiones anteriores con sus observaciones: solo lectura, para que el
+        # contratista sepa qué documento le objetaron y por qué.
+        ctx["historial"] = selectors.historial_de_versiones(cuenta)
+        # Soportes que adjuntaron los revisores a la versión vigente. Los ve
+        # todo el que ve la cuenta, incluido el contratista: son observaciones
+        # dirigidas a él.
+        ctx["puede_adjuntar_revision"] = selectors.puede_adjuntar_en_revision(
+            user, cuenta
+        )
+        ctx["adjuntos_revision"] = (
+            [
+                {
+                    "adjunto": a,
+                    "puede_quitar": selectors.puede_quitar_adjunto(user, a, cuenta),
+                }
+                for a in AdjuntoDeRevision.de(entrega)
+            ]
+            if entrega
+            else []
+        )
         ctx["tablero"] = selectors.tablero_revisiones(cuenta)
         ctx["faltantes"] = services.documentos_faltantes(cuenta)
         ctx["radicaciones"] = cuenta.revisionpararadicacion_set.order_by("fecha_creacion")
@@ -504,6 +543,14 @@ DESTINOS = {
             user, cuenta, datos.get("tipo_tramite", "")
         ),
     },
+    # Soporte opcional que adjunta quien revisa, junto a su comentario. Cuelga
+    # de la versión y no de la revisión, porque se sube ANTES de registrarla.
+    "adjunto_revision": {
+        "prefijo": "revisiones/%Y/%m/",
+        "permiso": lambda user, cuenta, datos: (
+            selectors.puede_adjuntar_en_revision(user, cuenta)
+        ),
+    },
 }
 
 
@@ -530,6 +577,48 @@ def _tipo_de_documento(cuenta, valor):
     return requisito.tipo_documento
 
 
+def _mensaje_de_subida(destino, cuenta):
+    """Qué decirle al usuario según lo que acaba de pasar.
+
+    "Documento cargado" valía para todos los destinos y se quedaba corto justo
+    donde más importa: al responder el último trámite la cuenta **se cierra en
+    la misma transacción**, y el usuario no se enteraba. Lo reportó como que el
+    paso de SECOP "no terminó la cuenta", cuando sí la había terminado.
+    """
+    if destino == "adjunto_revision":
+        return "Soporte adjuntado a la revisión."
+    if destino == "cierre":
+        return "Documento de cierre cargado."
+    if destino == "tramite":
+        cuenta.refresh_from_db()
+        if cuenta.fecha_cierre is not None:
+            return (
+                "Trámite registrado. Con esto se completaron los dos pasos "
+                "finales y la cuenta de cobro quedó CERRADA."
+            )
+        pendientes = [
+            TramiteFinal.Tipo(t).label
+            for t in services.SECUENCIA_TRAMITES
+            if not services.tramite_realizado(cuenta, t)
+        ]
+        if pendientes:
+            return f"Trámite registrado. Falta: {pendientes[0]}."
+        return "Trámite registrado."
+    return "Documento cargado."
+
+
+def _adjuntos_de_la_cuenta(cuenta):
+    """Adjuntos de revisión de cualquier versión de la cuenta.
+
+    Acota por cuenta a propósito: así un id de otra cuenta responde 404 en vez
+    de dejar descargar o borrar algo ajeno.
+    """
+    return AdjuntoDeRevision.objects.filter(
+        content_type=ContentType.objects.get_for_model(DocumentoEntrega),
+        object_id__in=cuenta.documentoentrega_set.values_list("pk", flat=True),
+    )
+
+
 class SubidaFirmarView(ModuloRequeridoMixin, _AccionCuentaMixin):
     """Paso 1: comprueba permisos y devuelve una URL firmada para subir."""
 
@@ -543,6 +632,10 @@ class SubidaFirmarView(ModuloRequeridoMixin, _AccionCuentaMixin):
             contexto = {"destino": destino, "cuenta": cuenta.pk}
             if destino == "tramite":
                 contexto["tramite"] = _tipo_de_tramite(request.POST.get("tipo_tramite"))
+            elif destino == "adjunto_revision":
+                # No lleva tipo del catálogo: es un soporte libre del revisor,
+                # identificado por el nombre que él escribe.
+                pass
             else:
                 contexto["tipo"] = _tipo_de_documento(
                     cuenta, request.POST.get("tipo_documento", "")
@@ -589,6 +682,16 @@ class SubidaConfirmarView(ModuloRequeridoMixin, _AccionCuentaMixin):
                     usuario=request.user,
                     clave=datos["clave"],
                 )
+            elif destino == "adjunto_revision":
+                nombre = (request.POST.get("nombre_documento") or "").strip()
+                if not nombre:
+                    raise ValidationError("Escribe el nombre del documento.")
+                AdjuntoDeRevision.objects.create(
+                    content_type=ContentType.objects.get_for_model(DocumentoEntrega),
+                    object_id=services.ultima_entrega(cuenta).pk,
+                    usuario=request.user, nombre=nombre,
+                    archivo=datos["clave"],
+                )
             else:
                 comentario = (request.POST.get("comentario") or "").strip()
                 if not comentario:
@@ -599,7 +702,7 @@ class SubidaConfirmarView(ModuloRequeridoMixin, _AccionCuentaMixin):
                 )
         except ValidationError as exc:
             return JsonResponse({"error": "; ".join(exc.messages)}, status=400)
-        messages.success(request, "Documento cargado.")
+        messages.success(request, _mensaje_de_subida(destino, cuenta))
         return JsonResponse({"ok": True})
 
 
@@ -634,6 +737,15 @@ class EliminarArchivoView(ModuloRequeridoMixin, _AccionCuentaMixin):
                 )
                 _exigir(selectors.puede_eliminar_documento(request.user, documento))
                 nombre = services.eliminar_documento(documento, request.user)
+            elif tipo == "adjunto":
+                adjunto = get_object_or_404(
+                    _adjuntos_de_la_cuenta(cuenta), pk=doc_pk
+                )
+                _exigir(
+                    selectors.puede_quitar_adjunto(request.user, adjunto, cuenta)
+                )
+                nombre = adjunto.nombre
+                adjunto.delete()   # el archivo se va con la fila (post_delete)
             else:
                 raise PermissionDenied("Tipo de archivo desconocido.")
             messages.success(request, f"Se quitó «{nombre}». Puedes cargarlo de nuevo.")
@@ -670,6 +782,11 @@ class DescargaView(ModuloRequeridoMixin, _AccionCuentaMixin):
             tramite = get_object_or_404(cuenta.tramites_finales, pk=doc_pk)
             campo = tramite.evidencia
             nombre = f"Evidencia {tramite.get_tipo_display()} {periodo}"
+        elif tipo == "adjunto":
+            adjunto = get_object_or_404(
+                _adjuntos_de_la_cuenta(cuenta), pk=doc_pk
+            )
+            campo, nombre = adjunto.archivo, f"{adjunto.nombre} {periodo}"
         else:
             raise PermissionDenied("Tipo de archivo desconocido.")
 

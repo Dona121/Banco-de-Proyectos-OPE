@@ -102,6 +102,10 @@ actividad para **ejecutarla** él mismo.
    - **Aprobada** → la actividad queda terminada.
    - **Requiere ajustes** → vuelve al formulador, que abre una versión nueva.
 
+   Además, **puede adjuntar documentos a su revisión** (opcional), apruebe o pida
+   ajustes: sirve para acompañar una observación con el documento que la
+   sustenta. Quien entregó los ve y los descarga.
+
    > Antes había una tercera opción, **Rechazada**, que hacía exactamente lo mismo
    > que «Requiere ajustes». Se retiró: dos nombres para una sola cosa solo
    > confundían. Las revisiones antiguas que la tengan se siguen viendo.
@@ -199,8 +203,15 @@ Contratista → (1ª revisión) Radicación/Supervisor → Supervisor nombra rev
    la cuenta queda congelada para que los revisores trabajen sobre un paquete que no
    cambia.
 3. **Entregar.** Cuando están todos, presiona **Entregar** para mandarlos a revisión.
-4. **Corregir** (si le devuelven la cuenta): sube de nuevo todos los documentos y
-   vuelve a entregar.
+4. **Corregir** (si le devuelven la cuenta): **solo vuelve a cargar los documentos
+   que le objetaron**. Los que ya estaban bien se conservan y aparecen bloqueados;
+   no hay que subirlos otra vez.
+
+   En **Versiones anteriores** puede ver qué documento le rechazaron y **por qué**,
+   con el comentario que escribió quien revisó. Es solo consulta.
+
+   Si quien revisó adjuntó algún soporte, lo encuentra en **Soportes de la
+   revisión** y lo puede descargar.
 
 **Qué se activa cuando actúa:**
 - Al **entregar**, la cuenta queda lista para la primera revisión y la pueden ver
@@ -287,14 +298,20 @@ nombrarlas.
    aprueban** (la cuenta se devuelve). Para poder **aprobar**, antes deben dejar
    cada documento marcado como *Aprobado* o *No aplica*: no se puede aprobar la
    revisión mientras quede algún documento pendiente o rechazado.
-2. **Declinar** (si no pueden): el supervisor pondrá a otra persona en ese rol.
+2. **Adjuntar soportes** (opcional). Junto a su comentario pueden subir uno o más
+   documentos: una captura, una norma, el formato corregido. Sirve tanto si
+   aprueban como si piden ajustes, y lo ve el contratista. Pueden quitarlo
+   mientras no hayan registrado su revisión.
+3. **Declinar** (si no pueden): el supervisor pondrá a otra persona en ese rol.
 
 **Qué se activa cuando actúan:**
 - Al **aprobar** el técnico, se habilita el jurídico; al aprobar el jurídico, se
   habilita el administrativo.
 - Cuando **los tres aprueban**, la cuenta pasa sola a la decisión del supervisor.
 - Si **cualquiera pide ajustes o no aprueba**, la cuenta vuelve al contratista y,
-  al corregir, la revisión **empieza de nuevo desde el técnico**.
+  al corregir, la revisión **empieza de nuevo desde el técnico**: los tres vuelven
+  a revisar. Lo que no se repite es el cargue: **los documentos ya aprobados se
+  conservan** y el contratista solo sube los que se objetaron.
 - Mientras el contratista no vuelva a entregar, **nadie puede revisar**: la pantalla
   de revisión no aparece, porque todavía no hay documentos que mirar.
 - Además, el **revisor administrativo** tiene a su cargo uno de los pasos finales

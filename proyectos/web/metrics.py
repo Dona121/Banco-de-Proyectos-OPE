@@ -78,6 +78,34 @@ def _pendientes_revision(entregas, ahora):
 ESTADOS_SIN_PLAZO = (Estado.EN_REVISION, Estado.APROBADA)
 
 
+def _tiempo_medio_de_respuesta(revisiones, revisor):
+    """Días que tarda ``revisor`` en responder, desde que recibe la entrega.
+
+    Dos precisiones, porque la tarjeta se lee como "lo que tardo yo":
+
+    * **Solo sus revisiones.** `revisiones_visibles` incluye también las que le
+      hacen a él cuando ejecuta una actividad (esas las revisa el director), y
+      promediarlas mezclaba su velocidad con la ajena.
+    * **Desde que se entregó**, no desde que se abrió el borrador (ver
+      `_entregada_el`): el tiempo que el ejecutor tardó en preparar la entrega
+      no es tiempo de revisión.
+
+    Es un promedio **histórico completo**, sin ventana: una mala racha antigua
+    sigue pesando igual que lo de esta semana.
+    """
+    dur = (
+        revisiones.filter(revisor=revisor)
+        .annotate(
+            delta=ExpressionWrapper(
+                F("fecha_creacion") - F("actividad_entrega__fecha_actualizacion"),
+                output_field=DurationField(),
+            )
+        )
+        .aggregate(prom=Avg("delta"))["prom"]
+    )
+    return round(dur.total_seconds() / 86400, 1) if dur else None
+
+
 def _proximas_y_vencidas(actividades, ahora):
     pendientes = actividades.exclude(estado__in=ESTADOS_SIN_PLAZO)
     vencidas = pendientes.filter(fecha_vencimiento__lt=ahora)
@@ -177,16 +205,7 @@ def coordinador(user):
     proximas, vencidas = _proximas_y_vencidas(actividades, ahora)
     segmentos, total_act = _distribucion_estado(actividades)
 
-    # Tiempo promedio de revisión (revisión.fecha_creacion - entrega.fecha_creacion).
-    dur = revisiones.annotate(
-        delta=ExpressionWrapper(
-            # Desde que se entregó (ver `_entregada_el`), no desde que se abrió
-            # el borrador: si no, el promedio incluye lo que tardó el ejecutor.
-            F("fecha_creacion") - F("actividad_entrega__fecha_actualizacion"),
-            output_field=DurationField(),
-        )
-    ).aggregate(prom=Avg("delta"))["prom"]
-    tiempo_prom = round(dur.total_seconds() / 86400, 1) if dur else None
+    tiempo_prom = _tiempo_medio_de_respuesta(revisiones, user)
 
     # Formuladores con más actividades pendientes (no aprobadas).
     formuladores = [

@@ -44,11 +44,29 @@ def borrar_archivos_al_confirmar(sender, instance, **kwargs):
     Cubre también las cascadas, porque Django emite ``post_delete`` por cada
     objeto que arrastra: borrar un proyecto limpia los documentos de todas sus
     entregas sin que nadie lo recuerde.
+
+    **Cuenta referencias antes de borrar.** Desde que una devolución arrastra
+    los documentos aprobados a la versión siguiente, dos filas pueden apuntar al
+    mismo objeto del bucket (la copia reutiliza la clave en vez de volver a
+    subir el archivo). Borrar una de ellas dejaría a la otra apuntando a la
+    nada, que es peor que un archivo huérfano: el huérfano solo ocupa sitio, la
+    fila rota rompe la descarga y nadie se entera hasta que alguien la pulsa.
     """
     for archivo in archivos_de(instance):
         nombre = archivo.name
         almacen = archivo.storage
+        if _otra_fila_usa(type(instance), archivo.field.name, nombre, instance.pk):
+            continue
         transaction.on_commit(lambda n=nombre, a=almacen: a.delete(n))
+
+
+def _otra_fila_usa(modelo, campo, clave, excluir_pk):
+    """True si otra fila del mismo modelo sigue apuntando a esa clave."""
+    return (
+        modelo.objects.filter(**{campo: clave})
+        .exclude(pk=excluir_pk)
+        .exists()
+    )
 
 
 def conectar_limpieza_de_archivos(*modelos):

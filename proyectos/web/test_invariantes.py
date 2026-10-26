@@ -655,3 +655,324 @@ class PanelesCoherentesConElFlujoTest(Base):
             with self.subTest(rol=rol):
                 datos = getattr(metrics, rol)(user)
                 self.assertIn("total_actividades", datos)
+
+
+class TiempoMedioDeRevisionTest(Base):
+    """Qué mide exactamente la tarjeta "Tiempo prom. revisión"."""
+
+    def _revisada(self, ejecutor, revisor):
+        act = self._act(asignado_a=ejecutor)
+        e = services.crear_entrega(act, ejecutor, "v1")
+        self._doc(e)
+        services.realizar_entrega(e, ejecutor)
+        services.registrar_revision(
+            e, revisor, Revisiones.ResultadoRevision.APROBADA, "ok"
+        )
+        return e
+
+    def test_solo_cuenta_lo_que_revisa_el_propio_usuario(self):
+        """No la velocidad del director revisando el trabajo del coordinador."""
+        self._revisada(self.form, self.coord)      # la revisa él
+        e2 = self._revisada(self.coord, self.director)  # se la revisan a él
+
+        # Se envejece la segunda para que, si entrara, moviera el promedio.
+        ActividadEntrega.objects.filter(pk=e2.pk).update(
+            fecha_actualizacion=timezone.now() - timedelta(days=30)
+        )
+        self.assertLess(metrics.coordinador(self.coord)["tiempo_prom"], 1)
+
+    def test_sin_revisiones_propias_no_hay_promedio(self):
+        self._revisada(self.coord, self.director)
+        self.assertIsNone(metrics.coordinador(self.coord)["tiempo_prom"])
+
+    def test_promedia_todas_sus_revisiones_no_solo_la_ultima(self):
+        from datetime import timedelta as td
+
+        e1 = self._revisada(self.form, self.coord)
+        e2 = self._revisada(self.form, self.coord)
+        # Una tardó 4 días en revisarse; la otra, el mismo día.
+        ActividadEntrega.objects.filter(pk=e1.pk).update(
+            fecha_actualizacion=timezone.now() - td(days=4)
+        )
+        prom = metrics.coordinador(self.coord)["tiempo_prom"]
+        self.assertAlmostEqual(prom, 2.0, delta=0.2)
+
+
+class AdjuntosDeRevisionProyectosTest(Base):
+    """Quien revisa puede acompañar su comentario con un documento.
+
+    Es opcional y cuelga de la entrega, no de la revisión: así se puede subir
+    antes de registrarla, que es cuando el revisor lo está escribiendo.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.act, self.entrega = self._act(), None
+        self.entrega = services.crear_entrega(self.act, self.form, "v1")
+        self._doc(self.entrega)
+        services.realizar_entrega(self.entrega, self.form)
+
+    def _adjunto(self, usuario=None):
+        from django.contrib.contenttypes.models import ContentType
+        from cuentas.models import AdjuntoDeRevision
+
+        return AdjuntoDeRevision.objects.create(
+            content_type=ContentType.objects.get_for_model(ActividadEntrega),
+            object_id=self.entrega.pk, usuario=usuario or self.coord,
+            nombre="Norma aplicable",
+            archivo=SimpleUploadedFile("n.pdf", b"x").name,
+        )
+
+    def test_puede_adjuntar_quien_revisa(self):
+        self.assertTrue(
+            selectors.puede_adjuntar_en_revision(self.coord, self.entrega)
+        )
+
+    def test_no_puede_adjuntar_quien_entrego(self):
+        """El ejecutor ya tiene su propio cargue; esto es del revisor."""
+        self.assertFalse(
+            selectors.puede_adjuntar_en_revision(self.form, self.entrega)
+        )
+        self.client.force_login(self.form)
+        resp = self.client.post(
+            f"/entregas/{self.entrega.pk}/revision/adjuntar/firmar/",
+            {"nombre_documento": "X", "nombre": "a.pdf"},
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_no_se_adjunta_sobre_un_borrador(self):
+        """Nadie revisa lo que su autor no ha entregado."""
+        otra = self._act()
+        borrador = services.crear_entrega(otra, self.form, "v1")
+        self.assertFalse(
+            selectors.puede_adjuntar_en_revision(self.coord, borrador)
+        )
+
+    def test_quien_entrego_lo_ve_y_lo_descarga(self):
+        """Es el punto: las observaciones van dirigidas a él."""
+        adj = self._adjunto()
+        self.client.force_login(self.form)
+        cuerpo = self.client.get(f"/entregas/{self.entrega.pk}/").content.decode()
+        self.assertIn("Soportes de la revisión", cuerpo)
+        self.assertIn("Norma aplicable", cuerpo)
+        self.assertIn(f"/revisiones/adjuntos/{adj.pk}/descargar/", cuerpo)
+
+    def test_un_ajeno_no_lo_descarga(self):
+        adj = self._adjunto()
+        self.client.force_login(self.otro)
+        resp = self.client.get(f"/revisiones/adjuntos/{adj.pk}/descargar/")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_el_autor_lo_quita_mientras_no_registre_la_revision(self):
+        adj = self._adjunto()
+        self.assertTrue(
+            selectors.puede_quitar_adjunto_de_revision(self.coord, adj, self.entrega)
+        )
+        self.client.force_login(self.coord)
+        with self.captureOnCommitCallbacks(execute=True):
+            resp = self.client.post(f"/revisiones/adjuntos/{adj.pk}/eliminar/")
+        self.assertEqual(resp.status_code, 302)
+
+    def test_tras_registrar_la_revision_ya_no_se_quita(self):
+        """Pasa a ser parte del expediente de una decisión ya tomada."""
+        adj = self._adjunto()
+        services.registrar_revision(
+            self.entrega, self.coord, Revisiones.ResultadoRevision.AJUSTES, "corrige"
+        )
+        self.entrega.refresh_from_db()
+        self.assertFalse(
+            selectors.puede_quitar_adjunto_de_revision(self.coord, adj, self.entrega)
+        )
+        self.client.force_login(self.coord)
+        self.assertEqual(
+            self.client.post(f"/revisiones/adjuntos/{adj.pk}/eliminar/").status_code,
+            403,
+        )
+
+    def test_quien_no_lo_subio_no_lo_quita(self):
+        adj = self._adjunto(usuario=self.coord)
+        self.assertFalse(
+            selectors.puede_quitar_adjunto_de_revision(self.director, adj, self.entrega)
+        )
+
+    def test_se_puede_adjuntar_tambien_al_aprobar(self):
+        """No es solo para devoluciones: puede dejar constancia al aprobar."""
+        services.registrar_revision(
+            self.entrega, self.coord, Revisiones.ResultadoRevision.APROBADA, "ok"
+        )
+        self.act.refresh_from_db()
+        # Aprobada cierra el expediente: ahí ya no se adjunta.
+        self.assertFalse(
+            selectors.puede_adjuntar_en_revision(self.coord, self.entrega)
+        )
+
+
+class SoportesDeRevisionSeCierranProyectosTest(Base):
+    """Misma regla que en cuentas de cobro: registrar la revisión cierra el cargue."""
+
+    def setUp(self):
+        super().setUp()
+        self.act = self._act()
+        self.entrega = services.crear_entrega(self.act, self.form, "v1")
+        self._doc(self.entrega)
+        services.realizar_entrega(self.entrega, self.form)
+
+    def test_antes_de_revisar_puede(self):
+        self.assertTrue(
+            selectors.puede_adjuntar_en_revision(self.coord, self.entrega)
+        )
+
+    def test_despues_de_revisar_ya_no(self):
+        services.registrar_revision(
+            self.entrega, self.coord, Revisiones.ResultadoRevision.AJUSTES, "corrige"
+        )
+        self.entrega.refresh_from_db()
+        self.assertFalse(
+            selectors.puede_adjuntar_en_revision(self.coord, self.entrega)
+        )
+        self.client.force_login(self.coord)
+        resp = self.client.post(
+            f"/entregas/{self.entrega.pk}/revision/adjuntar/firmar/",
+            {"nombre_documento": "Tardío", "nombre": "a.pdf"},
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_en_la_version_nueva_vuelve_a_poder(self):
+        """La devolución abre una versión nueva, y esa sí admite soportes."""
+        services.registrar_revision(
+            self.entrega, self.coord, Revisiones.ResultadoRevision.AJUSTES, "corrige"
+        )
+        self.act.refresh_from_db()
+        v2 = services.crear_entrega(self.act, self.form, "v2")
+        self._doc(v2)
+        services.realizar_entrega(v2, self.form)
+        self.assertTrue(selectors.puede_adjuntar_en_revision(self.coord, v2))
+
+
+class RestaurarUnRespaldoNoSeValidaTest(TestCase):
+    """`loaddata` no debe pasar por la validación de la señal.
+
+    La señal `pre_save` corre también en una restauración, y ahí los datos
+    vienen tal cual estaban: validarlos rompería el respaldo justo cuando más
+    falta hace que entre. Django marca esas llamadas con `raw=True`.
+    """
+
+    def test_la_senal_se_aparta_en_una_carga_raw(self):
+        from contenido.apps import _validar_antes_de_guardar
+
+        class Explota:
+            def full_clean(self):
+                raise AssertionError("no debió validarse en una carga raw")
+
+        _validar_antes_de_guardar(sender=None, instance=Explota(), raw=True)
+
+    def test_pero_si_valida_un_guardado_normal(self):
+        from django.core.exceptions import ValidationError
+
+        from contenido.apps import _validar_antes_de_guardar
+
+        class Invalida:
+            def full_clean(self):
+                raise ValidationError("mal")
+
+        with self.assertRaises(ValidationError):
+            _validar_antes_de_guardar(sender=None, instance=Invalida())
+
+
+class CleanDeModeloSinCamposTest(Base):
+    """Un `clean()` que da por supuesto un campo no puede acabar en un 500.
+
+    Django llama al `clean()` del modelo desde `_post_clean()` aunque el
+    formulario ya tenga errores de campo. `Actividades.clean()` compara las dos
+    fechas sin comprobar que existan, así que enviar el formulario de actividad
+    en blanco reventaba con `TypeError: '>' not supported between instances of
+    'NoneType' and 'NoneType'`: un 500 al pulsar Guardar, en la aplicación y en
+    el admin. `contenido/models.py` es definitivo, así que la guarda vive en el
+    formulario (`cuentas.formularios`).
+    """
+
+    def test_el_formulario_de_actividad_con_las_fechas_vacias_da_errores(self):
+        from web.forms import ActividadForm
+
+        form = ActividadForm(data={"nombre": "x"}, user=self.director)
+        self.assertFalse(form.is_valid())
+        self.assertIn("fecha_programada", form.errors)
+        self.assertIn("fecha_vencimiento", form.errors)
+
+    def test_el_formulario_de_edicion_tampoco_revienta(self):
+        from web.forms import ActividadEditForm
+
+        form = ActividadEditForm(data={"nombre": "x"}, instance=self._act())
+        self.assertFalse(form.is_valid())
+        self.assertIn("fecha_programada", form.errors)
+
+    def test_la_coherencia_de_fechas_sigue_valiendo_cuando_hay_fechas(self):
+        """La guarda salta el `clean()` solo si el formulario ya falló."""
+        from web.forms import ActividadForm
+
+        ahora = timezone.now()
+        form = ActividadForm(
+            data={
+                "nombre": "x",
+                "fecha_programada": (ahora + timedelta(days=5)).strftime("%Y-%m-%dT%H:%M"),
+                "fecha_vencimiento": ahora.strftime("%Y-%m-%dT%H:%M"),
+                "asignado_a": self.form.pk,
+            },
+            user=self.director,
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("mayor a la fecha de vencimiento", str(form.errors))
+
+    def test_el_admin_de_actividades_no_revienta_con_el_formulario_vacio(self):
+        from django.contrib import admin
+
+        opciones = admin.site._registry[Actividades]
+        peticion = type("P", (), {"user": User(is_superuser=True), "method": "GET"})()
+        form = opciones.get_form(peticion)(data={})
+        self.assertFalse(form.is_valid())
+        self.assertIn("fecha_programada", form.errors)
+
+    def test_ningun_formulario_del_admin_revienta_al_faltar_la_clave_ajena(self):
+        """El otro camino al mismo 500, por partida doble.
+
+        `ActividadEntrega.clean()` lee `self.actividad.estado` y
+        `Revisiones.clean()` lee `self.actividad_entrega.actividad.estado`: con
+        la clave ajena en blanco eso no es un campo vacío, es
+        `RelatedObjectDoesNotExist`. Comprobado antes de arreglarlo: los dos
+        reventaban.
+        """
+        from django.contrib import admin
+        from contenido.models import ActividadEntrega
+
+        peticion = type("P", (), {"user": User(is_superuser=True), "method": "GET"})()
+        for modelo, datos in ((ActividadEntrega, {"comentario": "x"}),
+                              (Revisiones, {"comentario": "x"})):
+            with self.subTest(modelo=modelo.__name__):
+                form = admin.site._registry[modelo].get_form(peticion)(data=datos)
+                self.assertFalse(form.is_valid())
+
+    def test_todo_admin_de_un_modelo_con_clean_propio_lleva_la_guarda(self):
+        """Lo mismo que la prueba de extensiones hace con los archivos.
+
+        Así un admin nuevo sobre un modelo con `clean()` no reabre el hueco en
+        silencio: o lleva la guarda, o esta prueba falla.
+        """
+        from django.contrib import admin
+        from django.db import models as djmodels
+
+        def tiene_clean_propio(modelo):
+            return modelo.clean is not djmodels.Model.clean
+
+        sin_guarda = []
+        for modelo, opciones in admin.site._registry.items():
+            objetivos = []
+            if tiene_clean_propio(modelo):
+                objetivos.append((modelo.__name__, opciones))
+            for inline in getattr(opciones, "inlines", None) or []:
+                if tiene_clean_propio(inline.model):
+                    objetivos.append((inline.model.__name__, inline))
+            for nombre, obj in objetivos:
+                mro = getattr(obj, "__mro__", None) or type(obj).__mro__
+                if not any("ModeloValidado" in c.__name__ for c in mro):
+                    sin_guarda.append(nombre)
+        self.assertEqual(sin_guarda, [], f"sin guarda: {sin_guarda}")

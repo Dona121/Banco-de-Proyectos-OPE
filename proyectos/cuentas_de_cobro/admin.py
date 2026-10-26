@@ -7,6 +7,10 @@ from django.contrib import admin, messages
 from django.shortcuts import render
 from django.utils.translation import gettext_lazy as _
 
+from cuentas.formularios import (
+    ModeloValidadoAdminMixin,
+    ModeloValidadoInlineMixin,
+)
 from cuentas.validadores import (
     ArchivoValidadoAdminMixin,
     ArchivoValidadoInlineMixin,
@@ -53,7 +57,7 @@ class RequisitoDocumentalInline(TabularInline):
     autocomplete_fields = ("tipo_documento",)
 
 
-class DocumentoEntregaInline(TabularInline):
+class DocumentoEntregaInline(ModeloValidadoInlineMixin, TabularInline):
     model = DocumentoEntrega
     extra = 0
     fields = ("numero_version", "usuario", "comentario", "fecha_creacion")
@@ -69,7 +73,7 @@ class DocumentosCuentaCobroInline(ArchivoValidadoInlineMixin, TabularInline):
     autocomplete_fields = ("tipo_documento",)
 
 
-class RevisionCuentaCobroInline(TabularInline):
+class RevisionCuentaCobroInline(ModeloValidadoInlineMixin, TabularInline):
     model = RevisionCuentaCobro
     extra = 0
     fields = ("rol", "asignacion", "resultado", "comentario")
@@ -92,14 +96,18 @@ class RevisionParaRadicacionInline(TabularInline):
     autocomplete_fields = ("supervisor",)
 
 
-class DocumentoCierreInline(ArchivoValidadoInlineMixin, TabularInline):
+class DocumentoCierreInline(
+    ModeloValidadoInlineMixin, ArchivoValidadoInlineMixin, TabularInline
+):
     model = DocumentoCierre
     extra = 0
     fields = ("tipo_documento", "documento", "usuario")
     autocomplete_fields = ("tipo_documento", "usuario")
 
 
-class TramiteFinalInline(ArchivoValidadoInlineMixin, TabularInline):
+class TramiteFinalInline(
+    ModeloValidadoInlineMixin, ArchivoValidadoInlineMixin, TabularInline
+):
     model = TramiteFinal
     extra = 0
     fields = ("tipo", "realizado", "evidencia", "usuario", "comentario")
@@ -191,7 +199,7 @@ def eliminar_cuentas_con_rastro(modeladmin, request, queryset):
 
 
 @admin.register(CuentaEntrega)
-class CuentaEntregaAdmin(ModelAdmin):
+class CuentaEntregaAdmin(ModeloValidadoAdminMixin, ModelAdmin):
     list_display = (
         "__str__", "usuario", "vigencia", "mes",
         "estado_revisores_badge", "estado_supervisor_badge", "fecha_radicacion",
@@ -230,7 +238,7 @@ class CuentaEntregaAdmin(ModelAdmin):
 
 
 @admin.register(DocumentoEntrega)
-class DocumentoEntregaAdmin(ModelAdmin):
+class DocumentoEntregaAdmin(ModeloValidadoAdminMixin, ModelAdmin):
     list_display = ("cuenta_entrega", "numero_version", "usuario", "fecha_creacion")
     list_filter = (("cuenta_entrega__vigencia", RelatedDropdownFilter),)
     search_fields = ("cuenta_entrega__usuario__username",)
@@ -254,7 +262,7 @@ class AsignacionRevisorAdmin(ModelAdmin):
 
 
 @admin.register(RevisionCuentaCobro)
-class RevisionCuentaCobroAdmin(ModelAdmin):
+class RevisionCuentaCobroAdmin(ModeloValidadoAdminMixin, ModelAdmin):
     list_display = ("documento_entrega", "rol", "resultado_badge", "fecha_creacion")
     list_filter = (("rol", ChoicesDropdownFilter), ("resultado", ChoicesDropdownFilter))
     search_fields = ("documento_entrega__cuenta_entrega__usuario__username",)
@@ -267,7 +275,9 @@ class RevisionCuentaCobroAdmin(ModelAdmin):
 
 
 @admin.register(TramiteFinal)
-class TramiteFinalAdmin(ArchivoValidadoAdminMixin, ModelAdmin):
+class TramiteFinalAdmin(
+    ModeloValidadoAdminMixin, ArchivoValidadoAdminMixin, ModelAdmin
+):
     list_display = ("cuenta_entrega", "tipo", "realizado", "usuario", "fecha_creacion")
     list_filter = (("tipo", ChoicesDropdownFilter), "realizado")
     search_fields = ("cuenta_entrega__usuario__username",)

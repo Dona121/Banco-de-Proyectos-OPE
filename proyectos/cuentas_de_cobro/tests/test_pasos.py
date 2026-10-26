@@ -7,6 +7,7 @@ rechazo del supervisor y cuenta cerrada) para poder optimizar el cálculo sin
 cambiar lo que ve el usuario.
 """
 from cuentas_de_cobro import services
+from cuentas_de_cobro.models import DocumentosCuentaCobro
 from cuentas_de_cobro.models import CuentaEntrega, RevisionCuentaCobro, TramiteFinal
 
 from .test_services import FlujoBaseTest, _archivo
@@ -195,11 +196,14 @@ class PasosDelFlujoTest(FlujoBaseTest):
     def test_devolucion_de_revisor(self):
         """Tras la devolución la pelota es del contratista, y así debe leerse.
 
-        Nace la versión 2 vacía y sin entregar: el cargue vuelve a estar en curso
-        y la revisión vuelve a esperar su turno, aunque la cuenta siga radicada y
-        con los tres revisores asignados. El paso siguiente salta la radicación
-        (que ya ocurrió) y nombra al revisor técnico, porque el ciclo reinicia
-        desde él.
+        Nace la versión 2 sin entregar: el cargue vuelve a estar en curso y la
+        revisión vuelve a esperar su turno, aunque la cuenta siga radicada y con
+        los tres revisores asignados. El paso siguiente salta la radicación (que
+        ya ocurrió) y nombra al revisor técnico, porque el ciclo reinicia desde
+        él.
+
+        La versión **no nace vacía**: arrastra los documentos aprobados con su
+        estado, y solo queda por recargar el que se rechazó.
         """
         cuenta = self._radicar(self._cuenta_con_documentos())
         a_ju, a_ad, a_te = self._asignar_todos(cuenta)
@@ -210,7 +214,13 @@ class PasosDelFlujoTest(FlujoBaseTest):
         entrega = services.ultima_entrega(cuenta)
         self.assertEqual(entrega.numero_version, 2)
         self.assertFalse(services.entrega_enviada(cuenta))
-        self.assertEqual(entrega.documentoscuentacobro_set.count(), 0)
+        # Se arrastra el aprobado; falta solo el que el revisor rechazó.
+        self.assertEqual(entrega.documentoscuentacobro_set.count(), 1)
+        self.assertEqual(
+            entrega.documentoscuentacobro_set.get().estado,
+            DocumentosCuentaCobro.EstadoDocumento.APROBADO,
+        )
+        self.assertEqual(len(services.documentos_faltantes(cuenta)), 1)
 
         estados = self._estados(cuenta)
         self.assertEqual(estados["entrega"], services.ACTUAL)

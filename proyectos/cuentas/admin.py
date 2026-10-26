@@ -2,11 +2,13 @@
 from django.contrib import admin
 from unfold.admin import ModelAdmin
 
+from .formularios import ModeloValidadoAdminMixin
+
 from .models import ExtensionArchivo
 
 
 @admin.register(ExtensionArchivo)
-class ExtensionArchivoAdmin(ModelAdmin):
+class ExtensionArchivoAdmin(ModeloValidadoAdminMixin, ModelAdmin):
     list_display = ("extension", "descripcion", "activa", "fecha_actualizacion")
     list_filter = ("activa",)
     search_fields = ("extension", "descripcion")

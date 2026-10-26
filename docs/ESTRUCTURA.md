@@ -28,6 +28,7 @@ La solución tiene **dos interfaces**:
 ```
 banproe/
 ├─ README.md                   # Puesta en marcha
+├─ CHANGELOG.md                # Qué cambió y respecto a qué, por fecha
 ├─ docs/                       # Documentación del proyecto
 │  ├─ ESTRUCTURA.md            # Este documento
 │  ├─ ModuloProyectos.md       # Requerimientos del módulo de proyectos (fuente del alcance)
@@ -61,7 +62,7 @@ banproe/
    └─ cuentas_de_cobro/        # Módulo de cuentas de cobro (app aparte; ver sección dedicada)
 ```
 
-> El repositorio incluye también `README.md`, `.gitignore`, `.env.example` y `Procfile` en la raíz. La documentación (este archivo, `ModuloProyectos.md`, `ModuloCuentasCobro.md`, `ManualRoles.md`, `RestriccionRoles.md`, `Pendientes.md`) vive en `docs/`.
+> El repositorio incluye también `README.md`, `CHANGELOG.md`, `.gitignore`, `.env.example` y `Procfile` en la raíz. La documentación (este archivo, `ModuloProyectos.md`, `ModuloCuentasCobro.md`, `ManualRoles.md`, `RestriccionRoles.md`, `Pendientes.md`) vive en `docs/`.
 
 ---
 
@@ -197,7 +198,7 @@ Módulo **aparte** (no toca las otras apps). Especificación autoritativa: `Modu
 | `context_processors.py` | `roles_cuentas_cobro`: roles + `cc_notificaciones` para el topbar. |
 | `admin.py` · `views.py` · `urls.py` · `templatetags/cuentas_cobro_extras.py` | Admin Unfold; CBVs delgadas; namespace `cuentas_cobro:`; tag `cc_badge`. |
 
-**Flujo:** contratista crea la cuenta y carga documentos → **Entregar** (valida completitud) → radicación (Supervisor o Radicación) → asignación de 3 revisores → revisión secuencial **técnico → jurídico → administrativo** (gating; para aprobar, todos los documentos en AP/NA) → decisión final del supervisor (para firma; setea `fecha_aprobacion_supervisor`) → **Radicación** carga los documentos de cierre **firmados** (mismos tipos del catálogo) → trámites finales **SF → SC** (Revisor administrativo / Secop) → cierre automático. **Reinicio TOTAL** ante cualquier devolución: nueva versión vacía y re-revisión desde el técnico.
+**Flujo:** contratista crea la cuenta y carga documentos → **Entregar** (valida completitud) → radicación (Supervisor o Radicación) → asignación de 3 revisores → revisión secuencial **técnico → jurídico → administrativo** (gating; para aprobar, todos los documentos en AP/NA) → decisión final del supervisor (para firma; setea `fecha_aprobacion_supervisor`) → **Radicación** carga los documentos de cierre **firmados** (mismos tipos del catálogo) → trámites finales **SF → SC** (Revisor administrativo / Secop) → cierre automático. Ante cualquier devolución, **las revisiones reinician desde el técnico** (los tres vuelven a revisar), pero **los documentos aprobados se arrastran** a la versión nueva: el contratista solo recarga lo que le objetaron.
 
 **Migraciones de grupos:** `0003_roles_cuentas_cobro` (Contratista/Supervisor/Revisor) y `0005_roles_radicacion_secop` (Radicacion/Secop).
 

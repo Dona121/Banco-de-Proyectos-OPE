@@ -297,6 +297,36 @@ def puede_revisar(user, entrega):
     return responsable_revision(entrega.actividad).id == user.id
 
 
+def puede_adjuntar_en_revision(user, entrega):
+    """Adjuntar un soporte a la revisión de una entrega de Proyectos.
+
+    Lo hace quien revisa (``responsable_revision``), apruebe o pida ajustes, y
+    es opcional: sirve para acompañar una observación con el documento que la
+    sustenta. Se permite mientras la entrega esté enviada y **no tenga todavía
+    revisión registrada**.
+
+    Se cierra al registrarla, por lo mismo que no se puede quitar un soporte ya
+    registrado: lo que respalda una decisión tomada no se toca. Y dejar el
+    cargue abierto después se leía como que la revisión no se había guardado.
+    """
+    if entrega.actividad.estado == Actividades.EstadoActividad.APROBADA:
+        return False
+    if not entrega_enviada(entrega):
+        return False
+    if hasattr(entrega, "revisiones"):
+        return False
+    if user.is_superuser:
+        return True
+    return responsable_revision(entrega.actividad).id == user.id
+
+
+def puede_quitar_adjunto_de_revision(user, adjunto, entrega):
+    """Quitar un adjunto propio mientras la revisión no esté registrada."""
+    if adjunto.usuario_id != user.id and not user.is_superuser:
+        return False
+    return not hasattr(entrega, "revisiones")
+
+
 def entregas_por_revisar(user):
     """Entregas sin revisar cuya revisión le corresponde a ``user`` (regla B).
 

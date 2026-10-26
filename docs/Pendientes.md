@@ -784,6 +784,72 @@ de ese paso.
     real. **Aislar la base no aísla el almacenamiento**, y es un tropiezo fácil
     de repetir.
 
+### Cuatro ajustes del 2026-10-25 (plan aprobado)
+
+23. **La devolución ya no obliga a recargarlo todo.** Era el punto que más
+    trabajo repetía: el revisor objetaba un documento y el contratista volvía a
+    subir los siete. `nueva_version` arrastra ahora los que estaban en `AP`/`NA`
+    con su estado, y solo quedan por recargar los rechazados.
+
+    **Las revisiones sí reinician**, decisión del usuario entre tres opciones:
+    los tres roles vuelven a tener turno desde el técnico. Como lo arrastrado ya
+    viene aprobado, cada uno solo mira lo que se recargó, y nadie firma una
+    versión que no vio entera.
+
+    Tres cosas caen solas (`documentos_faltantes`, el desplegable de carga y
+    `puede_entregar`, todas derivadas de "catálogo menos lo cargado") y dos no:
+
+    - **Un documento aprobado no se quita**, ni uno de una versión anterior. Lo
+      segundo lo destapó una prueba: el contratista **podía borrar documentos de
+      versiones pasadas**, es decir la prueba de lo que le objetaron.
+    - **La copia reutiliza la clave del bucket**, así que dos filas comparten
+      archivo. `cuentas.borrado` cuenta referencias antes de retirarlo; sin eso,
+      borrar una fila dejaba a la otra apuntando a la nada, que es peor que un
+      huérfano: el huérfano solo ocupa sitio, la fila rota rompe la descarga y
+      nadie se entera hasta que alguien la pulsa.
+
+    ⚠️ **Esto invierte la regla documentada.** Donde se lea "reinicio TOTAL, sin
+    carry-forward" está desactualizado: lo que no se arrastra son las
+    **revisiones**, no los documentos. Corregido en `CLAUDE.md`,
+    `ModuloCuentasCobro.md` y `ESTRUCTURA.md`.
+
+24. **Historial de versiones con sus observaciones** (`historial_de_versiones`).
+    Al devolver una cuenta, el contratista veía el comentario general del revisor
+    en la línea de tiempo, pero **no la causal documento a documento**: esa queda
+    escrita en la versión anterior, que el detalle dejaba de mostrar en cuanto
+    nacía la siguiente. Se quedaba sin saber cuál era el documento malo ni por
+    qué. Tarjeta nueva, plegable, **solo lectura**: abrir y descargar, ninguna
+    acción.
+
+25. **Quien revisa puede adjuntar documentos**, en los dos dominios y de forma
+    opcional (`cuentas.models.AdjuntoDeRevision`, relación genérica, en `cuentas`
+    porque los dos `models.py` son definitivos).
+
+    La decisión que lo hace funcionar: **cuelga del objeto revisado, no de la
+    revisión**. Cuando el revisor está escribiendo el formulario la revisión aún
+    no existe, así que no habría a qué atar el archivo; atado a la versión o a la
+    entrega, se puede subir antes de registrarla, que es como se usa.
+
+    Un fallo que encontró una prueba: el bloque estaba **dentro** de la tarjeta
+    "Mi revisión", que solo se pinta a quien tiene asignaciones, así que el
+    contratista (a quien van dirigidas las observaciones) no lo veía. Movido a
+    tarjeta propia.
+
+26. **Dos correcciones el mismo día, reportadas al probarlo.**
+
+    - *"Después que revisé la cuenta me siguió apareciendo el formulario de
+      cargue."* El cargue de soportes seguía abierto tras registrar la revisión,
+      porque lo había permitido a propósito ("por si quiere dejar constancia").
+      Era además **incoherente**: ya no se podía *quitar* un soporte tras
+      registrar la revisión, pero sí seguir añadiendo. Ahora se cierra al
+      registrarla, por rol (otro revisor que aún no decidió sigue pudiendo), en
+      los dos dominios. Ninguna de las 331 pruebas lo detectaba; hay 9 nuevas.
+    - El historial llega **plegado**, con un chevron que gira. Una cuenta con
+      varias devoluciones acumula versiones, y desplegadas empujaban el resto de
+      la pantalla fuera de la vista.
+
+**Suite: 340 pruebas** (eran 304).
+
 ### Regla de negocio corregida (reportada por el usuario al probar la app)
 
 La validación de "una cuenta por vigencia y mes" solo miraba si la cuenta

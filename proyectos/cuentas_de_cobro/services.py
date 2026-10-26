@@ -445,22 +445,57 @@ def revisar_documento(documento, estado, comentario="", actor=None):
 
 @transaction.atomic
 def nueva_version(cuenta, usuario, comentario="", detalle=""):
-    """Genera automáticamente una nueva versión (vacía) de la entrega.
+    """Genera la versión siguiente de la entrega tras una devolución.
+
+    **Las revisiones no se arrastran: los documentos aprobados sí.** La versión
+    nace sin ninguna revisión, así que el ciclo reinicia desde el revisor
+    técnico y los tres vuelven a tener turno; nadie aprueba una versión que no
+    vio completa. Pero los documentos que ya estaban en orden (``AP`` o ``NA``)
+    se copian con su estado, y solo los rechazados quedan por recargar.
+
+    Antes la versión nacía vacía y el contratista volvía a subirlo todo, incluso
+    lo que nadie había objetado. Con la copia, `documentos_faltantes` pasa a
+    devolver solo los rechazados y el desplegable de carga solo ofrece esos, sin
+    tocar nada más.
+
+    La copia **reutiliza la clave del objeto en el bucket**: no se vuelve a
+    subir ni a duplicar el archivo. Eso deja dos filas apuntando al mismo
+    objeto, que es por lo que `cuentas.borrado` cuenta referencias antes de
+    borrarlo.
 
     El ``save()`` del modelo autoincrementa ``numero_version`` y valida que la
-    cuenta no esté aprobada. La versión nueva nace SIN revisiones: reinicia el
-    ciclo y los tres roles vuelven a revisar desde cero. No se arrastran
-    revisiones ni documentos de versiones anteriores. La crea el sistema tras una
-    devolución; el contratista nunca la crea a mano.
+    cuenta no esté aprobada. La crea el sistema tras una devolución; el
+    contratista nunca la crea a mano.
     """
+    anterior = ultima_entrega(cuenta)
     entrega = DocumentoEntrega(
         cuenta_entrega=cuenta, usuario=cuenta.usuario,
         comentario=comentario or detalle or "Versión generada tras devolución",
     )
     entrega.save()
+    arrastrados = 0
+    if anterior is not None:
+        conservables = (
+            DocumentosCuentaCobro.EstadoDocumento.APROBADO,
+            DocumentosCuentaCobro.EstadoDocumento.NO_APLICA,
+        )
+        for doc in anterior.documentoscuentacobro_set.all():
+            if doc.estado not in conservables:
+                continue
+            copia = DocumentosCuentaCobro(
+                documento_entrega=entrega,
+                tipo_documento=doc.tipo_documento,
+                estado=doc.estado,
+                comentario=doc.comentario,
+            )
+            copia.documento.name = doc.documento.name
+            copia.save()
+            arrastrados += 1
     registrar_evento(
         cuenta, usuario, EventoTrazabilidad.Etapa.RADICACION,
-        Eventos.NUEVA_VERSION, detalle,
+        Eventos.NUEVA_VERSION,
+        f"{detalle} ({arrastrados} documento(s) ya aprobado(s) se conservan)"
+        if arrastrados else detalle,
     )
     return entrega
 
@@ -772,8 +807,21 @@ def decidir_supervisor(cuenta, supervisor, resultado, comentario):
 
     Aprobar habilita el cargue de los documentos de cierre firmados por el rol de
     radicación. El supervisor NO carga documentos.
+
+    **Se decide una sola vez.** `revisar_supervisor` sobreescribe el estado y la
+    fecha de aprobación sin mirar si ya había decisión, así que sin esta guarda
+    un doble clic movía la fecha y escribía dos veces en la bitácora, y un POST
+    posterior con `RE` podía dar por rechazada una cuenta que ya tenía los
+    documentos de cierre cargados y un trámite respondido. La decisión del
+    supervisor es el punto donde el expediente se firma: no se reabre desde la
+    aplicación.
     """
     cuenta = _lock(cuenta)
+    if cuenta.estado_supervisor is not None:
+        raise ValidationError(
+            "Esta cuenta ya tiene la decisión del supervisor "
+            f"(«{cuenta.get_estado_supervisor_display()}»): no se repite."
+        )
     cuenta.revisar_supervisor(resultado, comentario)
     aprobado = resultado == CuentaEntrega.ResultadoRevision.APROBADA
     registrar_evento(

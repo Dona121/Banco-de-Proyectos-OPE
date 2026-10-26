@@ -66,7 +66,8 @@
               <td class="whitespace-nowrap">
                 <a href="{{ d.documento.url }}" target="_blank" class="text-brand font-semibold hover:underline">Abrir</a>
                 <a href="{% url 'cuentas_cobro:descargar' cuenta.pk 'documento' d.pk %}" class="ml-3 text-slate-500 font-semibold hover:underline">Descargar</a>
-                {% if puede_cargar %}
+                {% comment %}Por documento, no por cuenta: un aprobado que se arrastró de la versión anterior no se quita, y ofrecer el icono solo lleva a un 403 que no explica nada.{% endcomment %}
+                {% if d.puede_eliminar %}
                 {% url 'cuentas_cobro:eliminar_archivo' cuenta.pk 'documento' d.pk as u_eliminar %}
                 <span class="ml-3">{% include 'components/eliminar_archivo.html' with accion=u_eliminar %}</span>
                 {% endif %}
@@ -118,6 +119,150 @@
       </p>
       {% endif %}
     </div>
+
+    {% comment %}
+    Versiones anteriores con lo que se observó en cada una. Es solo lectura: sin
+    acciones, solo abrir y descargar. Existe porque al devolver una cuenta el
+    contratista veía el comentario general en la línea de tiempo, pero no la
+    causal documento a documento, que queda escrita en la versión anterior.
+    {% endcomment %}
+    {% if historial %}
+    <div class="card p-6">
+      <h2 class="font-head font-semibold text-slate-800 mb-1">Versiones anteriores</h2>
+      <p class="text-xs text-slate-400 mb-4">Lo que se revisó y lo que se observó en cada una. Solo consulta.</p>
+      <div class="space-y-3">
+        {% for v in historial %}
+        {% comment %}
+        Plegado por omisión: una cuenta con varias devoluciones acumula versiones
+        y desplegadas empujan el resto de la pantalla fuera de la vista. El
+        chevron a la izquierda indica que se abre, y gira al hacerlo.
+        {% endcomment %}
+        <div class="rounded-lg border border-slate-100" x-data="{ abierta: false }">
+          <button type="button" @click="abierta = !abierta"
+                  class="flex w-full items-center gap-3 p-4 text-left hover:bg-slate-50">
+            <svg class="h-4 w-4 shrink-0 text-slate-400 transition" :class="abierta && 'rotate-180'"
+                 fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/>
+            </svg>
+            <span class="font-semibold text-slate-700">Versión {{ v.entrega.numero_version }}</span>
+            {% if v.observados %}
+            <span class="badge badge-rechazada">{{ v.observados|length }} observado{{ v.observados|length|pluralize }}</span>
+            {% endif %}
+            <span class="ml-auto shrink-0 text-xs text-slate-400">{{ v.entrega.fecha_creacion|date:"d M Y H:i" }}</span>
+          </button>
+
+          <div x-show="abierta" style="display:none" class="border-t border-slate-100 p-4">
+            {% comment %}Documentos de esa versión, con el estado y la causal escrita por quien revisó.{% endcomment %}
+            <table class="data">
+              <thead><tr><th>Tipo</th><th>Estado</th><th>Observación</th><th>Archivo</th></tr></thead>
+              <tbody>
+                {% for d in v.documentos %}
+                <tr>
+                  <td class="font-medium text-slate-700">{{ d.tipo_documento.nombre }}</td>
+                  <td>{% cc_badge d.estado proceso="documento" %}</td>
+                  <td class="text-slate-500 leading-snug">{{ d.comentario|default:"-" }}</td>
+                  <td>
+                    <a href="{% url 'cuentas_cobro:descargar' cuenta.pk 'documento' d.pk %}"
+                       class="text-slate-500 font-semibold hover:underline">Descargar</a>
+                  </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="4" class="py-6 text-center text-slate-400">Esta versión no llegó a tener documentos.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+
+            {% if v.revisiones %}
+            <p class="mt-4 text-xs font-semibold text-slate-500">Revisiones de esta versión</p>
+            <div class="mt-2 space-y-2">
+              {% for r in v.revisiones %}
+              <div class="rounded-lg bg-slate-50 p-3">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-semibold text-slate-700">{{ r.get_rol_display }}</span>
+                  {% cc_badge r.resultado proceso="revision" %}
+                  <span class="ml-auto text-xs text-slate-400">{{ r.fecha_creacion|date:"d M Y H:i" }}</span>
+                </div>
+                {% if r.comentario %}<p class="mt-1 text-sm text-slate-600 leading-snug">{{ r.comentario }}</p>{% endif %}
+                <p class="mt-1 text-xs text-slate-400">Por {{ r.asignacion.revisor.get_full_name|default:r.asignacion.revisor.username }}</p>
+              </div>
+              {% endfor %}
+            </div>
+            {% endif %}
+
+            {% comment %}Los soportes cuelgan de la versión: aquí siguen estando tras la devolución, aunque arriba ya se muestre la siguiente.{% endcomment %}
+            {% if v.adjuntos %}
+            <p class="mt-4 text-xs font-semibold text-slate-500">Soportes adjuntados en esta versión</p>
+            <ul class="mt-2 space-y-2">
+              {% for a in v.adjuntos %}
+              <li class="flex items-center gap-2 text-sm">
+                <span class="truncate text-slate-700">{{ a.nombre }}</span>
+                <a href="{% url 'cuentas_cobro:descargar' cuenta.pk 'adjunto' a.pk %}"
+                   class="text-slate-500 text-xs font-semibold hover:underline">Descargar</a>
+                <span class="ml-auto shrink-0 text-xs text-slate-400">{{ a.usuario.get_full_name|default:a.usuario.username }}</span>
+              </li>
+              {% endfor %}
+            </ul>
+            {% endif %}
+
+            {% if v.radicaciones %}
+            <p class="mt-4 text-xs font-semibold text-slate-500">Radicación</p>
+            <div class="mt-2 space-y-2">
+              {% for rad in v.radicaciones %}
+              <div class="rounded-lg bg-slate-50 p-3">
+                <div class="flex items-center gap-2">
+                  {% cc_badge rad.resultado proceso="radicacion" %}
+                  <span class="ml-auto text-xs text-slate-400">{{ rad.fecha_creacion|date:"d M Y H:i" }}</span>
+                </div>
+                {% if rad.comentario %}<p class="mt-1 text-sm text-slate-600 leading-snug">{{ rad.comentario }}</p>{% endif %}
+              </div>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% comment %}
+    Soportes que adjunta quien revisa, junto a su comentario. Opcionales, y
+    cuelgan de la versión y no de la revisión: por eso se suben antes de
+    registrarla. Van en tarjeta propia y NO dentro de "Mi revisión", que solo se
+    pinta a quien tiene asignaciones: el contratista, que es a quien van
+    dirigidas las observaciones, no las vería.
+    {% endcomment %}
+    {% if adjuntos_revision or puede_adjuntar_revision %}
+    <div class="card p-6">
+      <h2 class="font-head font-semibold text-slate-800 mb-1">Soportes de la revisión</h2>
+      <p class="text-xs text-slate-400 mb-4">Documentos que adjuntaron quienes revisan esta versión.</p>
+      <ul class="space-y-2">
+        {% for item in adjuntos_revision %}
+        <li class="flex items-center gap-2 text-sm">
+          <span class="truncate text-slate-700">{{ item.adjunto.nombre }}</span>
+          <a href="{% url 'cuentas_cobro:descargar' cuenta.pk 'adjunto' item.adjunto.pk %}"
+             class="text-slate-500 text-xs font-semibold hover:underline">Descargar</a>
+          {% if item.puede_quitar %}
+          {% url 'cuentas_cobro:eliminar_archivo' cuenta.pk 'adjunto' item.adjunto.pk as u_quitar_adj %}
+          {% include 'components/eliminar_archivo.html' with accion=u_quitar_adj %}
+          {% endif %}
+          <span class="ml-auto shrink-0 text-xs text-slate-400">{{ item.adjunto.usuario.get_full_name|default:item.adjunto.usuario.username }}</span>
+        </li>
+        {% empty %}
+        <li class="text-xs text-slate-400">Todavía no hay soportes adjuntos.</li>
+        {% endfor %}
+      </ul>
+      {% if puede_adjuntar_revision %}
+      {% url 'cuentas_cobro:subida_firmar' cuenta.pk 'adjunto_revision' as u_firmar_adj %}
+      {% url 'cuentas_cobro:subida_confirmar' cuenta.pk 'adjunto_revision' as u_confirmar_adj %}
+      {% include 'components/subida_directa.html' with firmar_url=u_firmar_adj confirmar_url=u_confirmar_adj tipos=None con_nombre=1 boton="Adjuntar soporte" %}
+      <p class="mt-2 text-xs text-slate-400 leading-snug">
+        Opcional. Acompaña tu comentario con el documento que lo sustenta.
+        Podrás quitarlo mientras no registres tu revisión.
+      </p>
+      {% endif %}
+    </div>
+    {% endif %}
 
     <!-- Radicación -->
     <div class="card p-6">

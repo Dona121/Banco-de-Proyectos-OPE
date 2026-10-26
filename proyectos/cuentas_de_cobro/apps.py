@@ -19,6 +19,12 @@ def _validar_antes_de_guardar(sender, instance, **kwargs):
     crudo. Para lo que tiene que ser cierto SIEMPRE está además la restricción
     `CHECK` de `cuentas_de_cobro/migrations/0007_restricciones_de_integridad.py`.
     """
+    # `raw=True` es una carga de fixtures o la restauración de un respaldo
+    # (`loaddata`). Ahí los datos vienen tal cual estaban y el objeto puede no
+    # tener todavía sus relaciones resueltas: validar rompería la restauración
+    # justo cuando más falta hace que funcione. Es la convención de Django.
+    if kwargs.get("raw"):
+        return
     instance.full_clean()
 
 

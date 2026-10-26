@@ -11,7 +11,14 @@ from django.db.models import Q
 from cuentas.roles import CONSULTA
 
 from . import services
-from .models import AsignacionRevisor, CuentaEntrega, RevisionCuentaCobro, TramiteFinal
+from .models import (
+    AsignacionRevisor,
+    CuentaEntrega,
+    DocumentoEntrega,
+    DocumentosCuentaCobro,
+    RevisionCuentaCobro,
+    TramiteFinal,
+)
 from .roles import (
     CONTRATISTA,
     RADICACION,
@@ -105,8 +112,25 @@ def puede_eliminar_documento(user, documento):
 
     Si el paquete sigue abierto para añadir, también lo está para corregir un
     cargue equivocado; en cuanto se entrega, queda congelado para las dos cosas.
+
+    Con una excepción: **un documento ya aprobado no se quita**. Tras una
+    devolución, los que estaban en orden se arrastran a la versión nueva con su
+    estado; permitir borrarlos sería la puerta de atrás para volver a cargarlos,
+    que es justo lo que el arrastre evita.
     """
-    return puede_cargar_documentos(user, documento.documento_entrega.cuenta_entrega)
+    conservados = (
+        DocumentosCuentaCobro.EstadoDocumento.APROBADO,
+        DocumentosCuentaCobro.EstadoDocumento.NO_APLICA,
+    )
+    if documento.estado in conservados:
+        return False
+    cuenta = documento.documento_entrega.cuenta_entrega
+    # Y solo en la versión vigente: las anteriores son el historial de lo que se
+    # observó, y el contratista no puede borrar la prueba de lo que le objetaron.
+    vigente = services.ultima_entrega(cuenta)
+    if vigente is None or documento.documento_entrega_id != vigente.pk:
+        return False
+    return puede_cargar_documentos(user, cuenta)
 
 
 # Un documento de cierre NO se quita. Se permitió un tiempo, para corregir un
@@ -240,6 +264,119 @@ def tablero_revisiones(cuenta):
             "asignacion": asignaciones.get(rol),
             "revision": revisiones.get(rol),
             "habilitado": services.rol_habilitado(entrega, rol),
+        })
+    return filas
+
+
+def _ya_reviso_esta_version(user, cuenta):
+    """True si algún rol activo de ``user`` ya revisó la versión vigente."""
+    entrega = services.ultima_entrega(cuenta)
+    if entrega is None:
+        return False
+    roles = list(
+        asignaciones_activas_de(user, cuenta).values_list("rol", flat=True)
+    )
+    return bool(roles) and entrega.revisioncuentacobro_set.filter(
+        rol__in=roles
+    ).exists()
+
+
+def puede_adjuntar_en_revision(user, cuenta):
+    """Adjuntar un soporte a la revisión: el revisor con asignación activa, y
+    **solo mientras no haya registrado la suya** sobre esta versión.
+
+    Es opcional y acompaña al comentario: una captura, una norma, el formato
+    corregido. Se puede subir **antes** de registrar la revisión, porque el
+    adjunto cuelga de la versión y no de la revisión (que aún no existe).
+
+    Se cierra al registrarla, por lo mismo que no se puede quitar un soporte ya
+    registrado: lo que respalda una decisión tomada no se toca. Dejar el cargue
+    abierto después, además, se leía como que la revisión no se había guardado.
+    """
+    if cuenta.fecha_radicacion is None or cuenta.estado_supervisor is not None:
+        return False
+    if not asignaciones_activas_de(user, cuenta).exists():
+        return False
+    # Y solo sobre una versión entregada. Al devolver nace la versión siguiente
+    # en el acto, sin revisiones, así que sin esta comprobación el cargue se
+    # reabría justo después de devolver: el revisor acababa de decidir y volvía
+    # a ver el formulario, como si no se hubiera guardado nada. La pelota es del
+    # contratista hasta que reentregue; ahí el revisor vuelve a tener turno y el
+    # cargue se abre otra vez, para esa versión.
+    if not services.entrega_enviada(cuenta):
+        return False
+    return not _ya_reviso_esta_version(user, cuenta)
+
+
+def puede_quitar_adjunto(user, adjunto, cuenta):
+    """Quitar un adjunto propio, mientras ese rol no haya registrado su revisión.
+
+    Después forma parte del expediente de esa revisión, igual que el resto de lo
+    que se firma en este módulo: lo que respalda una decisión ya tomada no se
+    retira.
+    """
+    if adjunto.usuario_id != user.id and not user.is_superuser:
+        return False
+    return not _ya_reviso_esta_version(user, cuenta)
+
+
+def historial_de_versiones(cuenta):
+    """Versiones anteriores de la entrega, con lo que se observó en cada una.
+
+    Es informativo y de solo lectura. Sin esto, cuando un revisor devolvía la
+    cuenta el contratista veía el comentario general en la línea de tiempo, pero
+    **no la causal documento a documento**: esa queda escrita en la versión
+    anterior, que el detalle dejaba de mostrar en cuanto nacía la siguiente. Se
+    quedaba sin saber cuál era el documento malo ni por qué.
+
+    Devuelve de la más reciente a la más antigua y **excluye la vigente**, que
+    ya se pinta arriba con sus acciones.
+    """
+    from django.contrib.contenttypes.models import ContentType
+
+    from cuentas.models import AdjuntoDeRevision
+
+    vigente = services.ultima_entrega(cuenta)
+    filas = []
+    entregas = sorted(
+        cuenta.documentoentrega_set.all(),
+        key=lambda e: e.numero_version,
+        reverse=True,
+    )
+    radicaciones = list(cuenta.revisionpararadicacion_set.all())
+    # Los soportes cuelgan de la versión, así que tras una devolución dejan de
+    # verse arriba (que muestra la vigente). Aquí es donde siguen estando: una
+    # consulta para todas las versiones, agrupada en memoria.
+    adjuntos_por_version = {}
+    for adj in AdjuntoDeRevision.objects.filter(
+        content_type=ContentType.objects.get_for_model(DocumentoEntrega),
+        object_id__in=[e.pk for e in entregas],
+    ).select_related("usuario"):
+        adjuntos_por_version.setdefault(adj.object_id, []).append(adj)
+    for entrega in entregas:
+        if vigente is not None and entrega.pk == vigente.pk:
+            continue
+        documentos = sorted(
+            entrega.documentoscuentacobro_set.all(),
+            key=lambda d: d.tipo_documento.nombre,
+        )
+        revisiones = sorted(
+            entrega.revisioncuentacobro_set.all(),
+            key=lambda r: services.SECUENCIA_ROLES.index(r.rol)
+            if r.rol in services.SECUENCIA_ROLES else 99,
+        )
+        filas.append({
+            "entrega": entrega,
+            "documentos": documentos,
+            "revisiones": revisiones,
+            "adjuntos": adjuntos_por_version.get(entrega.pk, []),
+            # La radicación no cuelga de la versión, así que se muestra solo en
+            # la primera: es la decisión que dejó entrar (o no) a la cuenta.
+            "radicaciones": radicaciones if entrega.numero_version == 1 else [],
+            "observados": [
+                d for d in documentos
+                if d.estado == DocumentosCuentaCobro.EstadoDocumento.RECHAZADO
+            ],
         })
     return filas
 

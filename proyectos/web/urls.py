@@ -41,6 +41,18 @@ urlpatterns = [
          views.DescargaDocumentoView.as_view(), name="documento_descargar"),
     path("documentos/<int:pk>/eliminar/",
          views.DocumentoEliminarView.as_view(), name="documento_eliminar"),
+    # Soportes que adjunta quien revisa (opcional, apruebe o pida ajustes).
+    path("entregas/<int:entrega_pk>/revision/adjuntar/firmar/",
+         views.AdjuntoRevisionFirmarView.as_view(), name="adjunto_revision_firmar"),
+    path("entregas/<int:entrega_pk>/revision/adjuntar/confirmar/",
+         views.AdjuntoRevisionConfirmarView.as_view(),
+         name="adjunto_revision_confirmar"),
+    path("revisiones/adjuntos/<int:pk>/descargar/",
+         views.AdjuntoRevisionDescargarView.as_view(),
+         name="adjunto_revision_descargar"),
+    path("revisiones/adjuntos/<int:pk>/eliminar/",
+         views.AdjuntoRevisionEliminarView.as_view(),
+         name="adjunto_revision_eliminar"),
     path("entregas/<int:entrega_pk>/revisar/",
          views.RevisionCreateView.as_view(), name="revision_nueva"),
 

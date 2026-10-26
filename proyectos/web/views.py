@@ -18,8 +18,17 @@ from django.views.generic import (
     UpdateView,
 )
 
-from contenido.models import Actividades, Documentos, Proyectos, Revisiones
+from django.contrib.contenttypes.models import ContentType
+
+from contenido.models import (
+    Actividades,
+    ActividadEntrega,
+    Documentos,
+    Proyectos,
+    Revisiones,
+)
 from cuentas.decorators import rol_requerido
+from cuentas.models import AdjuntoDeRevision
 from cuentas.subidas import confirmar_subida, firmar_subida, url_de_descarga
 from cuentas.validadores import validar_extension
 from cuentas.mixins import (
@@ -317,6 +326,12 @@ class ActividadCreateView(GestionRequeridoMixin, CreateView):
     roles_permitidos = (DIRECTOR, COORDINADOR)
 
     def dispatch(self, request, *args, **kwargs):
+        # Sin sesión no se resuelve nada: el mixin de abajo lleva al login.
+        # Si se resolviera antes, un visitante anónimo recibiría un 404
+        # ("no existe") en vez de la pantalla de entrada, porque los
+        # selectores no le devuelven ningún objeto.
+        if not request.user.is_authenticated:
+            return super().dispatch(request, *args, **kwargs)
         self.proyecto = get_object_or_404(
             selectors.proyectos_visibles(request.user), pk=kwargs["proyecto_pk"]
         )
@@ -441,6 +456,12 @@ class EntregaCreateView(ModuloProyectosRequeridoMixin, FormView):
     form_class = EntregaForm
 
     def dispatch(self, request, *args, **kwargs):
+        # Sin sesión no se resuelve nada: el mixin de abajo lleva al login.
+        # Si se resolviera antes, un visitante anónimo recibiría un 404
+        # ("no existe") en vez de la pantalla de entrada, porque los
+        # selectores no le devuelven ningún objeto.
+        if not request.user.is_authenticated:
+            return super().dispatch(request, *args, **kwargs)
         self.actividad = get_object_or_404(
             selectors.actividades_visibles(request.user), pk=kwargs["actividad_pk"]
         )
@@ -499,6 +520,20 @@ class EntregaDetailView(ModuloProyectosRequeridoMixin, DetailView):
         ctx["puede_documentar"] = selectors.puede_documentar(user, entrega)
         ctx["puede_realizar"] = selectors.puede_realizar_entrega(user, entrega)
         ctx["puede_revisar"] = selectors.puede_revisar(user, entrega)
+        # Soportes que adjunta quien revisa. Opcionales, y visibles para quien
+        # entregó: son las observaciones dirigidas a él.
+        ctx["puede_adjuntar_revision"] = selectors.puede_adjuntar_en_revision(
+            user, entrega
+        )
+        ctx["adjuntos_revision"] = [
+            {
+                "adjunto": a,
+                "puede_quitar": selectors.puede_quitar_adjunto_de_revision(
+                    user, a, entrega
+                ),
+            }
+            for a in AdjuntoDeRevision.de(entrega)
+        ]
         ctx["documento_form"] = DocumentoForm()
         ctx["revision_form"] = RevisionForm()
         ctx["breadcrumbs"] = [
@@ -622,6 +657,113 @@ class SubidaConfirmarView(_SubidaEntregaMixin):
             return JsonResponse({"error": "; ".join(exc.messages)}, status=400)
         messages.success(request, "Documento adjuntado.")
         return JsonResponse({"ok": True})
+
+
+class _AdjuntoRevisionMixin(ModuloProyectosRequeridoMixin, View):
+    """Base de la subida de soportes de revisión: misma entrega, mismo permiso."""
+
+    PREFIJO = "revisiones/%Y/%m/"
+
+    def entrega_revisable(self, request, entrega_pk):
+        entrega = get_object_or_404(
+            selectors.entregas_visibles(request.user), pk=entrega_pk
+        )
+        if not selectors.puede_adjuntar_en_revision(request.user, entrega):
+            raise PermissionDenied(
+                "Solo quien revisa esta entrega puede adjuntar soportes."
+            )
+        return entrega
+
+
+class AdjuntoRevisionFirmarView(_AdjuntoRevisionMixin):
+    def post(self, request, entrega_pk):
+        entrega = self.entrega_revisable(request, entrega_pk)
+        try:
+            nombre = (request.POST.get("nombre_documento") or "").strip()
+            if not nombre:
+                raise ValidationError("Escribe el nombre del documento.")
+            archivo = request.POST.get("nombre", "")
+            validar_extension(archivo)
+            datos = firmar_subida(
+                prefijo=self.PREFIJO,
+                nombre_archivo=archivo,
+                content_type=request.POST.get("content_type")
+                or "application/octet-stream",
+                contexto={"entrega": entrega.pk, "destino": "adjunto_revision"},
+            )
+        except ValidationError as exc:
+            return JsonResponse({"error": "; ".join(exc.messages)}, status=400)
+        return JsonResponse(datos)
+
+
+class AdjuntoRevisionConfirmarView(_AdjuntoRevisionMixin):
+    def post(self, request, entrega_pk):
+        entrega = self.entrega_revisable(request, entrega_pk)
+        try:
+            datos = confirmar_subida(request.POST.get("token", ""))
+            if (datos.get("entrega") != entrega.pk
+                    or datos.get("destino") != "adjunto_revision"):
+                raise ValidationError("La confirmación no corresponde a esta entrega.")
+            nombre = (request.POST.get("nombre_documento") or "").strip()
+            if not nombre:
+                raise ValidationError("Escribe el nombre del documento.")
+            AdjuntoDeRevision.objects.create(
+                content_type=ContentType.objects.get_for_model(ActividadEntrega),
+                object_id=entrega.pk, usuario=request.user,
+                nombre=nombre, archivo=datos["clave"],
+            )
+        except ValidationError as exc:
+            return JsonResponse({"error": "; ".join(exc.messages)}, status=400)
+        messages.success(request, "Soporte adjuntado.")
+        return JsonResponse({"ok": True})
+
+
+class AdjuntoRevisionEliminarView(ModuloProyectosRequeridoMixin, View):
+    """Quita un soporte propio, mientras la revisión no esté registrada."""
+
+    def post(self, request, pk):
+        adjunto = get_object_or_404(
+            AdjuntoDeRevision.objects.filter(
+                content_type=ContentType.objects.get_for_model(ActividadEntrega)
+            ),
+            pk=pk,
+        )
+        entrega = get_object_or_404(
+            selectors.entregas_visibles(request.user), pk=adjunto.object_id
+        )
+        if not selectors.puede_quitar_adjunto_de_revision(
+            request.user, adjunto, entrega
+        ):
+            raise PermissionDenied()
+        nombre = adjunto.nombre
+        adjunto.delete()   # el archivo se va con la fila (post_delete)
+        messages.success(request, f"Se quitó «{nombre}».")
+        return redirect("web:entrega_detalle", pk=entrega.pk)
+
+
+class AdjuntoRevisionDescargarView(ModuloProyectosRequeridoMixin, View):
+    """Descarga un soporte de revisión con su nombre legible."""
+
+    def get(self, request, pk):
+        adjunto = get_object_or_404(
+            AdjuntoDeRevision.objects.filter(
+                content_type=ContentType.objects.get_for_model(ActividadEntrega)
+            ),
+            pk=pk,
+        )
+        # El alcance lo da la entrega: quien no la ve, no baja su soporte.
+        get_object_or_404(
+            selectors.entregas_visibles(request.user), pk=adjunto.object_id
+        )
+        extension = (adjunto.archivo.name or "").rsplit(".", 1)
+        nombre = adjunto.nombre
+        if len(extension) == 2:
+            nombre = f"{nombre}.{extension[1]}"
+        try:
+            return redirect(url_de_descarga(adjunto.archivo, nombre))
+        except ValidationError as exc:
+            messages.error(request, "; ".join(exc.messages))
+            return redirect("web:entrega_detalle", pk=adjunto.object_id)
 
 
 class DocumentoEliminarView(ModuloProyectosRequeridoMixin, View):

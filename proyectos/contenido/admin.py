@@ -13,6 +13,10 @@ from django.utils.translation import gettext_lazy as _
 
 from unfold.admin import ModelAdmin, StackedInline, TabularInline
 
+from cuentas.formularios import (
+    ModeloValidadoAdminMixin,
+    ModeloValidadoInlineMixin,
+)
 from cuentas.validadores import ArchivoValidadoAdminMixin, ArchivoValidadoInlineMixin
 from unfold.contrib.filters.admin import ChoicesDropdownFilter, RelatedDropdownFilter
 from unfold.decorators import action, display
@@ -49,7 +53,7 @@ class SubactividadesInline(TabularInline):
     fields = ("nombre",)
 
 
-class ActividadesInline(TabularInline):
+class ActividadesInline(ModeloValidadoInlineMixin, TabularInline):
     model = Actividades
     extra = 0
     fields = ("nombre", "estado", "asignado_a", "fecha_vencimiento")
@@ -57,7 +61,7 @@ class ActividadesInline(TabularInline):
     show_change_link = True
 
 
-class ActividadEntregaInline(TabularInline):
+class ActividadEntregaInline(ModeloValidadoInlineMixin, TabularInline):
     model = ActividadEntrega
     extra = 0
     fields = ("numero_version", "usuario", "comentario", "fecha_creacion")
@@ -72,7 +76,7 @@ class DocumentosInline(ArchivoValidadoInlineMixin, TabularInline):
     fields = ("nombre", "archivo")
 
 
-class RevisionInline(StackedInline):
+class RevisionInline(ModeloValidadoInlineMixin, StackedInline):
     model = Revisiones
     extra = 0
     max_num = 1
@@ -102,7 +106,7 @@ class ProyectosAdmin(ModelAdmin):
 # Actividades
 # --------------------------------------------------------------------------- #
 @admin.register(Actividades)
-class ActividadesAdmin(ModelAdmin):
+class ActividadesAdmin(ModeloValidadoAdminMixin, ModelAdmin):
     list_display = ("nombre", "proyecto", "asignado_a", "estado_badge", "fecha_vencimiento")
     list_filter = (("estado", ChoicesDropdownFilter), ("proyecto", RelatedDropdownFilter),
                    "fecha_vencimiento")
@@ -159,7 +163,7 @@ class SubactividadesAdmin(ModelAdmin):
 # Entregas
 # --------------------------------------------------------------------------- #
 @admin.register(ActividadEntrega)
-class ActividadEntregaAdmin(ModelAdmin):
+class ActividadEntregaAdmin(ModeloValidadoAdminMixin, ModelAdmin):
     list_display = ("actividad", "numero_version", "usuario", "estado_actividad", "fecha_creacion")
     list_filter = (("actividad__proyecto", RelatedDropdownFilter),
                    ("actividad__estado", ChoicesDropdownFilter))
@@ -194,7 +198,7 @@ class DocumentosAdmin(ArchivoValidadoAdminMixin, ModelAdmin):
 # Revisiones
 # --------------------------------------------------------------------------- #
 @admin.register(Revisiones)
-class RevisionesAdmin(ModelAdmin):
+class RevisionesAdmin(ModeloValidadoAdminMixin, ModelAdmin):
     list_display = ("actividad_entrega", "revisor", "resultado_badge", "fecha_creacion")
     list_filter = (("resultado", ChoicesDropdownFilter),)
     search_fields = ("actividad_entrega__actividad__nombre", "revisor__username")
@@ -289,7 +293,7 @@ def eliminar_usuarios_con_rastro(modeladmin, request, queryset):
 
 
 @admin.register(User)
-class UserAdmin(DjangoUserAdmin, ModelAdmin):
+class UserAdmin(ModeloValidadoAdminMixin, DjangoUserAdmin, ModelAdmin):
     form = UserChangeForm
     add_form = UserCreationForm
     change_password_form = AdminPasswordChangeForm
