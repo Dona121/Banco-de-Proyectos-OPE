@@ -110,7 +110,7 @@ Modelos (en `contenido/models.py`, **no modificar**):
 | Archivo | Responsabilidad |
 |---|---|
 | `selectors.py` | **Querysets filtrados por rol** (Director: sus proyectos; Coordinador: los que coordina **y** las actividades que le asignaron como ejecutor; Formulador: sus actividades). Punto único de scoping. Además `responsable_revision(actividad)` (**fuente única** de quién revisa: coordinador del proyecto si la ejecuta un formulador, director si la ejecuta un coordinador), `puede_revisar()` y `entregas_por_revisar(user)`. |
-| `services.py` | **Transiciones de estado**: `crear_entrega()` (→ actividad En revisión), `registrar_revision()` (→ Aprobada / Requiere ajustes). También `notificaciones_para(user)`: pendientes derivados (proyecto/actividad asignada, **actividad por revisar dirigida a su revisor real** (coordinador o director), ajustes pedidos, plazos por cumplirse/vencidos). |
+| `services.py` | **Transiciones de estado**: `crear_entrega()` (abre la versión en **borrador**; la actividad sigue Pendiente), `realizar_entrega()` (**exige al menos un documento**; congela el paquete y pasa la actividad a En revisión) y `registrar_revision()` (→ Aprobada / Requiere ajustes). También `notificaciones_para(user)`: pendientes derivados (proyecto/actividad asignada, **actividad por revisar dirigida a su revisor real** (coordinador o director), ajustes pedidos, plazos por cumplirse/vencidos). |
 | `context_processors.py` | `notificaciones_web`: expone `web_notificaciones` / `web_notificaciones_total` al topbar (campana de proyectos). |
 | `metrics.py` | Métricas de dashboards por rol (`director()`, `coordinador()`, `formulador()`). |
 | `forms.py` | `ProyectoForm`, `ActividadForm`, `SubactividadForm`, `EntregaForm`, `DocumentoForm`, `RevisionForm` (estilizados). |
@@ -270,7 +270,7 @@ python manage.py test --settings=proyectos.test_settings
 ## Dependencias
 
 - **Runtime (pyproject):** Django 5.2, django-unfold (con tope `<0.98`), django-storages + boto3 (bucket de Supabase), dj-database-url + psycopg2-binary, whitenoise, gunicorn, python-dotenv, openpyxl, reportlab.
-- **Solo en el venv** (preparación de assets, no son del producto): `pypdf`, `pymupdf`, `pillow`.
+- **Solo en el venv** (preparación de assets, no son del producto): `pillow`. `pypdf` y `pymupdf` estuvieron para preparar el escudo y ya no están instalados.
 - `django-import-export` se retiró: no tenía ninguna referencia en el código ni estaba en `INSTALLED_APPS`. Con él se fueron `tablib` y `diff-match-patch`.
 
 ---

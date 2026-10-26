@@ -396,6 +396,11 @@ Siguen abiertos:
    confirmar la transacción. `selectors.puede_reemplazar_evidencia` +
    `services.reemplazar_evidencia`; pruebas en `ReemplazarEvidenciaTest`.
 
+   > **Esta función ya no existe: se retiró por completo el mismo día. Ver el
+   > punto 13.** Lo que queda en el código es el evento
+   > `Eventos.EVIDENCIA_REEMPLAZADA` (hay cuentas con ese asiento) y una prueba
+   > de regresión que comprueba que ni el servicio ni el selector volvieron.
+
    ⚠️ **Corregido el mismo día, por indicación del usuario.** La primera versión
    permitía reemplazar **también con la cuenta cerrada**, con el argumento de que el
    cierre es automático y si no el error se detectaría siempre demasiado tarde. El
@@ -412,7 +417,7 @@ Siguen abiertos:
    detectaría demasiado tarde", conviene mirar si lo que se está construyendo es una
    ventana con cierre o una puerta abierta de forma permanente. Era lo segundo.
 
-10. **Confirmación antes de enviar, en los cuatro cargues.** Salió de una pregunta
+8. **Confirmación antes de enviar, en los cuatro cargues.** Salió de una pregunta
     del usuario: *"¿el usuario cuando carga un documento errado puede volver a
     cargar y se quita el anterior, antes de darle aprobar al envío?"*. Al revisarlo,
     la respuesta era que **ese "aprobar el envío" no existía**: el botón subía el
@@ -430,7 +435,7 @@ Siguen abiertos:
     irreversibles añaden un aviso de lo que implica confirmar (el del cargue en
     SECOP II dice que la cuenta se cierra y el soporte ya no se podrá cambiar).
 
-11. ⚠️ **Fallo de reactividad encontrado al probar lo anterior en el navegador, y
+9. ⚠️ **Fallo de reactividad encontrado al probar lo anterior en el navegador, y
     anterior a este cambio.** `puedeSubir` lee los campos con `querySelectorAll`,
     es decir del DOM, que **no es reactivo**: Alpine solo reevalúa un getter cuando
     cambia una propiedad reactiva que ese getter tocó. Escribir en un `<input>` no
@@ -445,7 +450,7 @@ Siguen abiertos:
     el tipo de defecto que no aparece en una prueba de plantilla: el HTML era
     correcto en los dos casos.
 
-12. **Se retiró el borrado de documentos de cierre** (reportado por el usuario:
+10. **Se retiró el borrado de documentos de cierre** (reportado por el usuario:
     *"después de subir todos y eliminarlo posteriormente me trabó el flujo"*).
     Completar el cierre es lo que habilita el cargue en SIIFWEB, así que retirar un
     documento después lo deshabilitaba otra vez: la cuenta quedaba oscilando entre
@@ -468,7 +473,7 @@ Siguen abiertos:
     no descompleta el cierre (así que no reproduce el problema) y esquiva la
     unicidad. Pendiente de decidir si se implementa.
 
-13. **Se retiró el reemplazo de evidencia de los trámites finales**, a petición del
+11. **Se retiró el reemplazo de evidencia de los trámites finales**, a petición del
     usuario (*"quita la opción de reemplazar en siifweb"* / *"con la confirmación
     por ahora está bien"*). Como el cargue en SECOP II ya no tenía ventana
     (responderlo cierra la cuenta), quitar la de SIIFWEB **elimina la función
@@ -494,11 +499,11 @@ Siguen abiertos:
     etapa de cierre, y a cambio **avisa antes** en todos los cargues. Si aparece un
     caso real de archivo equivocado ya registrado, la vía es el admin.
 
-8. **Sin sombras en los botones** (`.btn-primary`, `.btn-outline`). Se conservó el
+12. **Sin sombras en los botones** (`.btn-primary`, `.btn-outline`). Se conservó el
    anillo de `:focus-visible`: esa no es decoración, es lo que permite usar la
    aplicación con el teclado.
 
-9. **Fuera el guion largo de todo el sistema** (código, plantillas y documentación).
+13. **Fuera el guion largo de todo el sistema** (código, plantillas y documentación).
    ⚠️ **El reemplazo automático causó daño colateral y hay que saberlo**: una
    expresión regular que emparejaba guiones como si fueran pares de paréntesis
    corrompió 27 frases, cruzando paréntesis entre bloques distintos (p. ej. el
@@ -508,6 +513,7 @@ Siguen abiertos:
    repitió el barrido sobre los 123 archivos de texto del proyecto: quedaba **una**
    frase dañada en `CLAUDE.md`, ya reparada, y los dos únicos avisos restantes son
    falsos positivos dentro del bundle minificado de Alpine.
+
 ### Cuatro ajustes del 2026-10-07 (plan aprobado)
 
 14. **La entrega tiene un momento de cierre: botón "Realizar entrega".** Reportado

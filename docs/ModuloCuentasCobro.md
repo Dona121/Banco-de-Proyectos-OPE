@@ -686,10 +686,12 @@ grupo de Django, se resuelve por `AsignacionRevisor.rol` por cuenta. Por tanto:
    asignación → revisión técnica→jurídica→admin → decisión supervisor → cargue de
    cierre firmado por radicación → trámites finales `SF`→`SC` → cierre); gating
    secuencial (que `JU` no arranque sin `TE`); completitud (falta un obligatorio →
-   no avanza); declinación + reasignación; **reinicio TOTAL desde técnico** (ante
-   cualquier devolución, la nueva versión nace vacía, el contratista reentrega el
-   paquete completo y los tres roles re-revisan desde cero; el archivo de la versión
-   previa se preserva); creación automática de versión vía "Entregar" (no manual);
+   no avanza); declinación + reasignación; **reinicio de las revisiones desde el
+   técnico, con arrastre de los documentos** (ante cualquier devolución la versión
+   nueva no tiene revisiones, así que los tres roles vuelven a tener turno, pero
+   **arrastra los documentos en `AP`/`NA` con su estado**: el contratista solo
+   repone los rechazados, y la versión no es revisable hasta que vuelva a pulsar
+   "Entregar"); creación automática de versión vía "Entregar" (no manual);
    `TramiteFinal` (evidencia exige `realizado=True`; secuencialidad `SF`→`SC`;
    cada paso solo por su rol); cargue de cierre por radicación (no contratista);
    completitud de cierre contra los obligatorios de la vigencia; que
@@ -722,10 +724,16 @@ grupo de Django, se resuelve por `AsignacionRevisor.rol` por cuenta. Por tanto:
 - La completitud documental se valida contra `RequisitoDocumental`.
 - El gating secuencial (técnico→jurídico→administrativo) es inviolable desde la UI
   y desde servicios.
-- Ante cualquier devolución, el flujo reinicia **totalmente desde técnico**: nueva
-  versión vacía, reentrega del paquete completo, re-revisión de los tres roles; el
-  archivo de la versión anterior se preserva. La versión se crea automáticamente con
-  "Entregar", nunca de forma manual.
+- Ante cualquier devolución, **las revisiones** reinician desde el técnico (la
+  versión nueva no tiene ninguna, así que los tres vuelven a tener turno), pero los
+  **documentos aprobados se arrastran** con su estado: solo hay que reponer los
+  rechazados. Las versiones anteriores se conservan y se pueden consultar con sus
+  observaciones. La versión se crea automáticamente al devolver, nunca de forma
+  manual, y no es revisable hasta que el contratista vuelva a pulsar "Entregar".
+
+  > **Cambió el 2026-10-25.** Antes la versión nacía vacía y había que reentregar
+  > el paquete completo. Si lees "reinicio total, sin arrastre" en algún sitio, está
+  > obsoleto.
 - Un revisor que declinó no puede registrar revisiones.
 - El supervisor aprueba para firma (no carga documentos); **radicación** carga los
   documentos de cierre firmados; no se cierra sin todos los tipos **obligatorios de
